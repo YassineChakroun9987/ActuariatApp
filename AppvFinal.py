@@ -1261,12 +1261,17 @@ if file:
             try:
                 # Read primes if provided
                 primes_data = None
-                if primes_file:
-                    primes_data = _read_and_validate_primes(primes_file.read())
-                    if primes_data is not None and not primes_data.empty:
-                        st.success("✅ Primes file loaded successfully")
-                    elif primes_data is None or primes_data.empty:
-                        st.warning("⚠️ Primes file is empty or invalid; S/P sheet will be skipped")
+                if primes_file is not None:
+                    try:
+                        primes_bytes = primes_file.read()
+                        if primes_bytes:
+                            primes_data = _read_and_validate_primes(primes_bytes)
+                            if primes_data is not None and not primes_data.empty:
+                                st.success("✅ Primes file loaded successfully")
+                            else:
+                                st.warning("⚠️ Primes file is empty or invalid; S/P sheet will be skipped")
+                    except Exception as e:
+                        st.warning(f"Could not read primes file: {e}")
                 
                 xlsx_bytes = _build_excel_report(
                     df_orig=df_raw,
@@ -1296,22 +1301,30 @@ if file:
                 file_name=f"{download_base}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            
+            # Display bootstrap report download buttons if available
             bootstrap_reports = st.session_state.get("BOOTSTRAP_REPORTS", {})
 
-            if "Poissonbootstrap" in bootstrap_reports:
+            if bootstrap_reports:
+                st.markdown("---")
+                st.subheader("📊 Bootstrap Reports")
+                
+            if "Poissonbootstrap" in bootstrap_reports and bootstrap_reports["Poissonbootstrap"] is not None:
                 st.download_button(
                     "📊 Download Poisson Bootstrap Report",
                     data=bootstrap_reports["Poissonbootstrap"],
                     file_name="Poisson_Bootstrap_Report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="poisson_dl"
                 )
 
-            if "ChainLadderBootstrap" in bootstrap_reports:
+            if "ChainLadderBootstrap" in bootstrap_reports and bootstrap_reports["ChainLadderBootstrap"] is not None:
                 st.download_button(
                     "📈 Download Chain Ladder Bootstrap Report",
                     data=bootstrap_reports["ChainLadderBootstrap"],
                     file_name="ChainLadder_Bootstrap_Report.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="cl_dl"
                 )
 else:
     st.info("Upload an Excel file to begin.")
