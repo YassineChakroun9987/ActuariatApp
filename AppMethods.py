@@ -24,9 +24,6 @@ except Exception:  # pragma: no cover
 # Where bootstrap reports are saved
 # =========================================================
 
-except Exception:
-    # If this somehow fails, we'll fall back to CWD at write time.
-    pass
 
 
 # =========================================================
