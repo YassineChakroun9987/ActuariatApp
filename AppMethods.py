@@ -645,9 +645,9 @@ def Poissonbootstrap(
     idx_ay, cols_dev = tri_inc.index, tri_inc.columns
     n, m = tri_inc.shape
 
-    # Ensure numeric labels preserved
-    tri_inc.columns = pd.to_numeric(cols_dev, errors="coerce").astype("Int64")
-    tri_inc.index = pd.to_numeric(idx_ay, errors="coerce").astype("Int64")
+    # Ensure numeric labels preserved (round first to safely handle floats)
+    tri_inc.columns = np.rint(pd.to_numeric(cols_dev, errors="coerce")).astype("Int64")
+    tri_inc.index = np.rint(pd.to_numeric(idx_ay, errors="coerce")).astype("Int64")
 
     # Masks
     obs_mask, fut_mask = _mask_frontier(tri_inc, zero_future_tol)
