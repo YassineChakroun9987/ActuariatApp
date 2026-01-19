@@ -720,6 +720,50 @@ def _read_sheet(file_bytes: bytes, sheet_name: str, index_col=0) -> pd.DataFrame
     return df
 
 # =========================
+# PRIMES READER & VALIDATOR
+# =========================
+def _read_and_validate_primes(file_bytes: bytes) -> pd.DataFrame | None:
+    """
+    Read primes Excel file and return a DataFrame with:
+    - Index: year (int)
+    - Column: Premium (numeric)
+    Returns None if invalid or empty.
+    """
+    try:
+        xls = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
+        sheet = xls.sheet_names[0]  # Use first sheet
+        df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet, engine="openpyxl")
+        
+        if df.empty or df.shape[1] < 2:
+            return None
+        
+        # Assume first column is year, second is premium
+        year_col = df.columns[0]
+        premium_col = df.columns[1]
+        
+        # Extract and coerce to numeric
+        primes = pd.DataFrame({
+            "year": pd.to_numeric(df[year_col], errors="coerce"),
+            "premium": pd.to_numeric(df[premium_col], errors="coerce")
+        })
+        
+        # Remove rows with NaN in either column
+        primes = primes.dropna()
+        
+        if primes.empty:
+            return None
+        
+        # Convert year to int and set as index
+        primes["year"] = primes["year"].astype(int)
+        primes = primes.set_index("year")
+        primes = primes.rename(columns={"premium": "Premium"})
+        
+        return primes
+    except Exception as e:
+        st.warning(f"Failed to read primes file: {e}")
+        return None
+
+# =========================
 # EXCEL WRITING UTILITIES
 # =========================
 def _write_final_report_block(xw, sheet_name: str, df_orig: pd.DataFrame, completed_best: pd.DataFrame, ibnr_label: str):
@@ -760,6 +804,7 @@ def _build_excel_report(
     ultime_artifacts: dict[int, dict] | None,
     method_scores: pd.DataFrame | None,
     chosen_ay_for_selection: int | None,
+    primes_df: pd.DataFrame | None = None,
 ) -> bytes:
     titles: dict[str, str] = {}
     buffer = io.BytesIO()
@@ -893,6 +938,36 @@ def _build_excel_report(
                 _ceil_numeric(grid).to_excel(xw, sheet_name=sheet_name, index=True, startrow=1)
                 titles[sheet_name] = f"{m}: Ultimes Grid (AY ≤ {ultime_start_year}; Cuts {cuts[0]}–{cuts[-1]})"
 
+        # --- S/P Ratio Sheet (if primes provided)
+        if primes_df is not None and not primes_df.empty:
+            try:
+                comp_clean = _coerce_age_columns(_coerce_index_to_int(completed_best))
+                ultimates = comp_clean.iloc[:, -1].rename("Ultimate")
+                
+                # Align ultimates with primes by year
+                sp_data = pd.DataFrame({
+                    "Ultimate": ultimates,
+                    "Premium": primes_df["Premium"]
+                })
+                
+                # Keep only rows where both ultimate and premium exist
+                sp_data = sp_data.dropna()
+                
+                if not sp_data.empty:
+                    # Calculate S/P ratio (Sinistre/Prime)
+                    sp_data["S/P"] = sp_data["Ultimate"] / sp_data["Premium"]
+                    
+                    # Format for display
+                    sp_display = sp_data.copy()
+                    sp_display["Ultimate"] = np.ceil(sp_display["Ultimate"]).astype("Int64")
+                    sp_display["Premium"] = np.ceil(sp_display["Premium"]).astype("Int64")
+                    sp_display["S/P"] = sp_display["S/P"].apply(lambda x: f"{x:.4f}" if pd.notna(x) and np.isfinite(x) else "")
+                    
+                    sp_display.to_excel(xw, sheet_name="S_P_Ratio", index=True, startrow=1)
+                    titles["S_P_Ratio"] = f"S/P Ratio (Sinistre/Prime) — Method: {chosen_method}"
+            except Exception as e:
+                st.warning(f"Could not compute S/P ratio: {e}")
+
         # Styling
         _apply_global_excel_styles(xw.book, titles)
 
@@ -905,6 +980,7 @@ def _build_excel_report(
 _brand_header()
 
 file = st.file_uploader("Drop your Excel file (.xlsx)", type=["xlsx"], accept_multiple_files=False)
+primes_file = st.file_uploader("(Optional) Upload Primes file (.xlsx) — 2 columns: Year, Premium", type=["xlsx"], accept_multiple_files=False, key="primes_upload")
 
 def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
     st.subheader("Methods")
@@ -1183,6 +1259,15 @@ if file:
 
             # 3) Build the workbook
             try:
+                # Read primes if provided
+                primes_data = None
+                if primes_file:
+                    primes_data = _read_and_validate_primes(primes_file.read())
+                    if primes_data is not None and not primes_data.empty:
+                        st.success("✅ Primes file loaded successfully")
+                    elif primes_data is None or primes_data.empty:
+                        st.warning("⚠️ Primes file is empty or invalid; S/P sheet will be skipped")
+                
                 xlsx_bytes = _build_excel_report(
                     df_orig=df_raw,
                     completed_best=completed,
@@ -1195,6 +1280,7 @@ if file:
                     ultime_artifacts=ultime_artifacts,
                     method_scores=method_scores,
                     chosen_ay_for_selection=int(selection_ay),
+                    primes_df=primes_data,
                 )
             except Exception as e:
                 st.error(f"Failed to build report: {e}")
