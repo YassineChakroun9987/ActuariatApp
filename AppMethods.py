@@ -7,23 +7,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# =========================================================
-# Optional Numba (kept harmless if missing)
-# =========================================================
-try:
-    from numba import njit
-    NUMBA_AVAILABLE = True
-except Exception:  # pragma: no cover
-    NUMBA_AVAILABLE = False
-    def njit(*args, **kwargs):
-        def deco(f):
-            return f
-        return deco
-
-# =========================================================
-# Where bootstrap reports are saved
-# =========================================================
-
 
 
 # =========================================================
