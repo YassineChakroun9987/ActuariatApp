@@ -690,7 +690,32 @@ def Poissonbootstrap(
 
     rng = np.random.default_rng(seed)
     inc_vals = tri_inc.to_numpy(dtype=float)
-    inc_obs_vals = np.where(obs_mask, np.nan_to_num(inc_vals, nan=0.0), 0.0).astype(float)
+    
+    # Properly initialize inc_obs_vals:
+    # - Keep observed values from inc_vals 
+    # - Set future cells to 0.0 for simulation
+    # - Replace NaNs in observed cells with 0.0 for GLM fitting
+    inc_obs_vals = np.where(obs_mask, inc_vals, 0.0).astype(float)
+    # Now replace remaining NaNs (from unobserved cells masked as 0) with 0.0
+    inc_obs_vals = np.nan_to_num(inc_obs_vals, nan=0.0)
+    
+    # IMPORTANT: Ensure last row (latest AY) is never marked as having zeros
+    # The last row should use all observed data from original incremental values
+    last_row_idx = n - 1
+    last_row_obs_mask = obs_mask[last_row_idx, :]
+    if last_row_obs_mask.any():
+        # For last row, use original incremental values where observed
+        inc_obs_vals[last_row_idx, :] = np.where(
+            last_row_obs_mask, 
+            inc_vals[last_row_idx, :], 
+            0.0
+        )
+        # Clean NaNs
+        inc_obs_vals[last_row_idx, :] = np.nan_to_num(
+            inc_obs_vals[last_row_idx, :], 
+            nan=0.0
+        )
+    
     fut_mask_arr = fut_mask.astype(bool)
     lam_cap_val = 1e6 if lam_cap is None else float(lam_cap)
     eps = MU_FLOOR
@@ -699,7 +724,8 @@ def Poissonbootstrap(
     sample_list = []
 
     # Preserve first column: never simulate, always use observed
-    first_col_obs = inc_obs_vals[:, 0].copy()
+    # Use original inc_vals first column for all rows
+    first_col_obs = np.where(obs_mask[:, 0], inc_vals[:, 0], 0.0)
 
     # -----------------------------
     # Bootstrap loop
