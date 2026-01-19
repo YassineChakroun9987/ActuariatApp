@@ -510,7 +510,8 @@ def _cached_ultime_cycle(df_orig: pd.DataFrame, method_names: list[str], start_y
         if not ult_df.empty:
             for m, col in ult_df.items():
                 for ay, val in col.items():
-                    sequences[m][int(ay)].append(float(val) if pd.notna(val) else np.nan)
+                    ay_int = int(np.rint(float(ay)))
+                    sequences[m][ay_int].append(float(val) if pd.notna(val) else np.nan)
 
         if cut == cuts[-1]:
             final_ultimes = ult_df
