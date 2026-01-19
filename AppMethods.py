@@ -498,7 +498,6 @@ import warnings
 
 
 
-
 def Poissonbootstrap(
     df: pd.DataFrame,
     Report: bool = True,
@@ -554,7 +553,9 @@ def Poissonbootstrap(
         return cleaned or default
 
     def _coerce_numeric(df_in: pd.DataFrame) -> pd.DataFrame:
+        """Coerce columns to numeric, preserving original index and columns."""
         out = df_in.copy()
+        # Convert only the data, not index/columns
         for c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce")
         return out
@@ -584,6 +585,7 @@ def Poissonbootstrap(
                 is_monotone.append(False)
                 continue
             is_monotone.append(np.all(np.diff(v) >= -1e-12))
+        
         # Require strong monotonicity
         if np.mean(is_monotone) >= 0.7:
             diff = arr[:, 1:] - arr[:, :-1]
@@ -593,26 +595,51 @@ def Poissonbootstrap(
             return pd.DataFrame(inc, index=df_in.index, columns=df_in.columns)
         return df_in.copy()
 
-    # --- safe frontier mask
+    # --- safe frontier mask (FIXED)
     def _mask_frontier(inc: pd.DataFrame, tol: float):
         n, m = inc.shape
         obs = np.zeros((n, m), dtype=bool)
         fut = np.zeros((n, m), dtype=bool)
         arr = inc.to_numpy(dtype=float)
+        
         for i in range(n):
             row = arr[i, :]
             finite = np.isfinite(row)
             if not finite.any():
+                # If no finite values, mark all as observed (they're NaN/empty)
+                obs[i, :] = True
                 continue
-            valid = (np.abs(row) > tol) & finite
-            last_valid = np.max(np.where(valid)[0]) if valid.any() else -1
-            if last_valid >= 0:
-                obs[i, : last_valid + 1] = finite[: last_valid + 1]
-                if last_valid + 1 < m:
-                    fut[i, last_valid + 1 :] = True
-        # always keep last AY
-        if not obs[-1, :].any():
-            obs[-1, :] = np.isfinite(arr[-1, :])
+            
+            # Find the last finite value in the row
+            finite_indices = np.where(finite)[0]
+            if len(finite_indices) == 0:
+                obs[i, :] = True  # All are NaN
+                continue
+            
+            last_finite_idx = finite_indices[-1]
+            
+            # Mark everything up to and including the last finite as observed
+            obs[i, :last_finite_idx + 1] = True
+            
+            # Mark everything after the last finite as future
+            if last_finite_idx + 1 < m:
+                fut[i, last_finite_idx + 1:] = True
+        
+        # Special handling for last accident year
+        # In typical triangles, the last AY has only the first dev period observed
+        # So we should ensure at least the first column is marked as observed
+        last_row_idx = n - 1
+        last_row_finite = np.isfinite(arr[last_row_idx, :])
+        if last_row_finite.any():
+            # Find last finite value in last row
+            last_finite_idx = np.where(last_row_finite)[0][-1]
+            obs[last_row_idx, :last_finite_idx + 1] = True
+            if last_finite_idx + 1 < m:
+                fut[last_row_idx, last_finite_idx + 1:] = True
+        else:
+            # If no finite values in last row, mark first column as observed (typical triangle)
+            obs[last_row_idx, 0] = True
+        
         return obs, fut
 
     # --- Pearson residuals
@@ -645,23 +672,37 @@ def Poissonbootstrap(
     idx_ay, cols_dev = tri_inc.index, tri_inc.columns
     n, m = tri_inc.shape
 
-    # Ensure numeric labels preserved (round first to safely handle floats)
-    tri_inc.columns = np.rint(pd.to_numeric(cols_dev, errors="coerce")).astype("Int64")
-    tri_inc.index = np.rint(pd.to_numeric(idx_ay, errors="coerce")).astype("Int64")
-
-    # Masks
+    # Masks (FIXED: using the updated _mask_frontier)
     obs_mask, fut_mask = _mask_frontier(tri_inc, zero_future_tol)
-    if not obs_mask.any() or not fut_mask.any():
-        raise ValueError("No valid observed/future cells detected.")
+    if not obs_mask.any():
+        raise ValueError("No observed cells detected.")
+    
+    # Debug: print mask info
+    if debug:
+        print(f"Triangle shape: {n}x{m}")
+        print(f"Observed cells: {obs_mask.sum()}")
+        print(f"Future cells: {fut_mask.sum()}")
+        print(f"Last row obs mask: {obs_mask[-1, :]}")
+        print(f"Last row fut mask: {fut_mask[-1, :]}")
 
     # Observed values
-    y_all = tri_inc.to_numpy(dtype=float)[obs_mask]
-    finite_idx = np.isfinite(y_all)
-    y_obs = np.clip(y_all[finite_idx], 0.0, np.inf)
-    obs_pos = np.argwhere(obs_mask)[finite_idx]
+    inc_vals = tri_inc.to_numpy(dtype=float)
+    
+    # Get observed values for GLM fitting
+    obs_positions = np.where(obs_mask)
+    y_obs = inc_vals[obs_positions]
+    
+    # Remove NaN values from observed (in case some observed cells are NaN)
+    valid_mask = np.isfinite(y_obs)
+    y_obs = y_obs[valid_mask]
+    obs_positions = (obs_positions[0][valid_mask], obs_positions[1][valid_mask])
+    
+    if len(y_obs) == 0:
+        raise ValueError("No valid numeric values in observed cells.")
 
-    AY_obs = pd.Categorical(idx_ay[obs_pos[:, 0]], categories=idx_ay, ordered=True)
-    DV_obs = pd.Categorical(cols_dev[obs_pos[:, 1]], categories=cols_dev, ordered=True)
+    # Prepare design matrices
+    AY_obs = pd.Categorical(idx_ay[obs_positions[0]], categories=idx_ay, ordered=True)
+    DV_obs = pd.Categorical(cols_dev[obs_positions[1]], categories=cols_dev, ordered=True)
 
     X_obs = pd.concat(
         [pd.get_dummies(AY_obs, prefix="AY", drop_first=True),
@@ -670,8 +711,9 @@ def Poissonbootstrap(
     X_cols = X_obs.columns
     X_obs_np = X_obs.to_numpy(dtype=float)
 
-    AY_full = np.repeat(idx_ay.values, m)
-    DV_full = np.tile(cols_dev.values, n)
+    # Prepare full design matrix
+    AY_full = np.repeat(idx_ay, m)
+    DV_full = np.tile(cols_dev, n)
     X_full = pd.concat(
         [pd.get_dummies(pd.Categorical(AY_full, categories=idx_ay, ordered=True),
                         prefix="AY", drop_first=True),
@@ -689,43 +731,25 @@ def Poissonbootstrap(
     r_pool, phi_base = _pearson_resid(y_obs, mu_obs, len(res_base.params))
 
     rng = np.random.default_rng(seed)
-    inc_vals = tri_inc.to_numpy(dtype=float)
     
-    # Properly initialize inc_obs_vals:
-    # - Keep observed values from inc_vals 
-    # - Set future cells to 0.0 for simulation
-    # - Replace NaNs in observed cells with 0.0 for GLM fitting
-    inc_obs_vals = np.where(obs_mask, inc_vals, 0.0).astype(float)
-    # Now replace remaining NaNs (from unobserved cells masked as 0) with 0.0
+    # Initialize arrays for simulation
+    inc_obs_vals = np.zeros_like(inc_vals, dtype=float)
+    inc_obs_vals[obs_mask] = inc_vals[obs_mask]  # Use original observed values
     inc_obs_vals = np.nan_to_num(inc_obs_vals, nan=0.0)
-    
-    # IMPORTANT: Ensure last row (latest AY) is never marked as having zeros
-    # The last row should use all observed data from original incremental values
-    last_row_idx = n - 1
-    last_row_obs_mask = obs_mask[last_row_idx, :]
-    if last_row_obs_mask.any():
-        # For last row, use original incremental values where observed
-        inc_obs_vals[last_row_idx, :] = np.where(
-            last_row_obs_mask, 
-            inc_vals[last_row_idx, :], 
-            0.0
-        )
-        # Clean NaNs
-        inc_obs_vals[last_row_idx, :] = np.nan_to_num(
-            inc_obs_vals[last_row_idx, :], 
-            nan=0.0
-        )
     
     fut_mask_arr = fut_mask.astype(bool)
     lam_cap_val = 1e6 if lam_cap is None else float(lam_cap)
     eps = MU_FLOOR
 
-    cum_samples = np.empty((B, n, m), dtype=float)
+    cum_samples = np.full((B, n, m), np.nan, dtype=float)
     sample_list = []
 
-    # Preserve first column: never simulate, always use observed
-    # Use original inc_vals first column for all rows
-    first_col_obs = np.where(obs_mask[:, 0], inc_vals[:, 0], 0.0)
+    # CRITICAL FIX: Don't blindly set first column to 0
+    # Instead, preserve the observed values in first column
+    # Only use zeros for cells that are truly unobserved
+    first_col_mask = obs_mask[:, 0]
+    first_col_vals = np.where(first_col_mask, inc_vals[:, 0], 0.0)
+    first_col_vals = np.nan_to_num(first_col_vals, nan=0.0)
 
     # -----------------------------
     # Bootstrap loop
@@ -743,12 +767,29 @@ def Poissonbootstrap(
         mu_future = np.where(fut_mask_arr, mu_full, np.nan)
         mask_fut = np.isfinite(mu_future)
         inc_repl = inc_obs_vals.copy()
+        
         if mask_fut.any():
             lam = np.minimum(np.maximum(mu_future[mask_fut], eps) / phi_eff, lam_cap_val)
-            inc_repl[mask_fut] = phi_eff * rng.poisson(lam)
+            # Simulate future increments
+            simulated = phi_eff * rng.poisson(lam)
+            inc_repl[mask_fut] = simulated
         
-        # Always preserve first column (development age 1)
-        inc_repl[:, 0] = first_col_obs
+        # Preserve observed values (including first column)
+        # This is important: we should never overwrite observed values
+        inc_repl[obs_mask] = inc_obs_vals[obs_mask]
+        
+        # Special handling: if first column has zeros in original data, keep them
+        # Don't force zeros if they're not in the original data
+        for i in range(n):
+            if not first_col_mask[i]:
+                # If first column is not observed, it might be 0 or simulated
+                # Check if it was simulated in fut_mask
+                if fut_mask[i, 0]:
+                    # It was simulated, keep the simulation
+                    pass
+                else:
+                    # It should be 0 (before first observed dev period)
+                    inc_repl[i, 0] = 0.0
         
         cum_repl = np.cumsum(inc_repl, axis=1)
         cum_samples[b, :, :] = cum_repl
@@ -756,6 +797,9 @@ def Poissonbootstrap(
             sample_list.append(pd.DataFrame(cum_repl, index=idx_ay, columns=cols_dev))
         if debug and b < 3:
             print(f"[DEBUG] iter={b}, phi={phi_eff:.6g}, simulated={mask_fut.sum()}")
+            if b == 0:
+                print(f"  First col values: {inc_repl[:, 0]}")
+                print(f"  Last row values: {inc_repl[-1, :]}")
 
     # -----------------------------
     # Aggregate results
@@ -765,7 +809,7 @@ def Poissonbootstrap(
     p75_cum = np.nanpercentile(cum_samples, 75, axis=0)
     p99_cum = np.nanpercentile(cum_samples, 99, axis=0)
 
-    mk = lambda arr: pd.DataFrame(arr, index=idx_ay, columns=cols_dev).reindex(index=idx_ay, columns=cols_dev)
+    mk = lambda arr: pd.DataFrame(arr, index=idx_ay, columns=cols_dev)
 
     # -----------------------------
     # Excel Report
@@ -791,8 +835,14 @@ def Poissonbootstrap(
             })
             meta.to_excel(xl, sheet_name="Meta", index=False)
 
-            tri_inc_full = pd.DataFrame(tri_inc.to_numpy(), index=idx_ay, columns=cols_dev)
+            tri_inc_full = pd.DataFrame(inc_vals, index=idx_ay, columns=cols_dev)
             tri_inc_full.to_excel(xl, sheet_name="Input_Incremental")
+
+            # Also show masks for debugging
+            obs_df = pd.DataFrame(obs_mask.astype(int), index=idx_ay, columns=cols_dev)
+            fut_df = pd.DataFrame(fut_mask.astype(int), index=idx_ay, columns=cols_dev)
+            obs_df.to_excel(xl, sheet_name="Observed_Mask")
+            fut_df.to_excel(xl, sheet_name="Future_Mask")
 
             for i, C in enumerate(sample_list):
                 C.to_excel(xl, sheet_name=f"Iter{i+1}_Cum")
@@ -805,7 +855,7 @@ def Poissonbootstrap(
         buffer.seek(0)
         report_bytes = buffer.getvalue()
     
-    # Return Selected Mode (moved outside if block)
+    # Return Selected Mode
     mode = (Mode or "").upper()
 
     if mode in {"MEAN", "MED"}:
@@ -820,10 +870,6 @@ def Poissonbootstrap(
         out = mk(p50_cum)
 
     return out, report_bytes
-
-
-
-
 
 
 

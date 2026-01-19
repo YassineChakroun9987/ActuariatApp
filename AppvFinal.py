@@ -586,7 +586,7 @@ def _ceil_numeric(df: pd.DataFrame) -> pd.DataFrame:
         if pd.api.types.is_numeric_dtype(out[c]):
             s = pd.to_numeric(out[c], errors="coerce")
             s = s.replace([np.inf, -np.inf], np.nan)
-            out[c] = np.ceil(s).astype("Int64")
+            out[c] = np.rint(np.ceil(s)).astype("Int64")
     return out
 
 def _format_display(df: pd.DataFrame) -> pd.DataFrame:
@@ -604,7 +604,7 @@ def _format_display(df: pd.DataFrame) -> pd.DataFrame:
         txt = pd.Series([""] * len(s), index=s.index, dtype="object")
 
         if finite.any():
-            vf = np.ceil(v[finite]).astype("Int64")
+            vf = np.rint(np.ceil(v[finite])).astype("Int64")
             txt.loc[finite] = vf.apply(lambda x: "" if pd.isna(x) else f"{int(x):,}".replace(",", " "))
 
         pos_inf = ~finite & (vals > 0)
