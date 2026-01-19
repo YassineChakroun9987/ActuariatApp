@@ -698,6 +698,9 @@ def Poissonbootstrap(
     cum_samples = np.empty((B, n, m), dtype=float)
     sample_list = []
 
+    # Preserve first column: never simulate, always use observed
+    first_col_obs = inc_obs_vals[:, 0].copy()
+
     # -----------------------------
     # Bootstrap loop
     # -----------------------------
@@ -717,6 +720,10 @@ def Poissonbootstrap(
         if mask_fut.any():
             lam = np.minimum(np.maximum(mu_future[mask_fut], eps) / phi_eff, lam_cap_val)
             inc_repl[mask_fut] = phi_eff * rng.poisson(lam)
+        
+        # Always preserve first column (development age 1)
+        inc_repl[:, 0] = first_col_obs
+        
         cum_repl = np.cumsum(inc_repl, axis=1)
         cum_samples[b, :, :] = cum_repl
         if b < 5:
