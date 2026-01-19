@@ -23,10 +23,7 @@ except Exception:  # pragma: no cover
 # =========================================================
 # Where bootstrap reports are saved
 # =========================================================
-import streamlit as st
-SAVE_DIR = Path(st.session_state.get("REPORT_SAVE_DIR", Path.home() / "Downloads"))
-try:
-    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
 except Exception:
     # If this somehow fails, we'll fall back to CWD at write time.
     pass
@@ -212,48 +209,93 @@ def ChainLadderBootstrap(
     # -----------------------------
     # Optional Excel Report (SAVE_DIR)
     # -----------------------------
+    report_bytes = None
     if Report:
-        base_dir = SAVE_DIR if SAVE_DIR.exists() else Path.cwd()
-        fname = (report_name or "CL_Bootstrap_Report").strip() or "CL_Bootstrap_Report"
-        out_path = (base_dir / f"{fname}.xlsx")
+        buffer = io.BytesIO()
 
-        def _make_excel_writer(path: Path):
+        # Robust writer (xlsxwriter preferred, openpyxl fallback)
+        try:
+            writer = pd.ExcelWriter(
+                buffer,
+                engine="xlsxwriter",
+                engine_kwargs={"options": {"strings_to_numbers": True}}
+            )
+        except TypeError:  # older pandas
             try:
-                return pd.ExcelWriter(path, engine="xlsxwriter",
-                                      engine_kwargs={"options": {"strings_to_numbers": True}})
-            except TypeError:  # older pandas
-                try:
-                    return pd.ExcelWriter(path, engine="xlsxwriter",
-                                          options={"strings_to_numbers": True})
-                except Exception:
-                    return pd.ExcelWriter(path, engine="openpyxl")
+                writer = pd.ExcelWriter(
+                    buffer,
+                    engine="xlsxwriter",
+                    options={"strings_to_numbers": True}
+                )
+            except Exception:
+                writer = pd.ExcelWriter(buffer, engine="openpyxl")
 
-        with _make_excel_writer(out_path) as xl:
+        with writer as xl:
+            # -----------------------------
+            # INPUTS & PARAMETERS
+            # -----------------------------
             C_input.to_excel(xl, sheet_name="Input_Cumulative")
-            pd.Series(f_pos, index=C_input.columns[:-1], name="f_j").to_excel(xl, sheet_name="Frozen_Factors")
+            pd.Series(
+                f_pos,
+                index=C_input.columns[:-1],
+                name="f_j"
+            ).to_excel(xl, sheet_name="Frozen_Factors")
+
+            # -----------------------------
+            # BACKTRACKED EXPECTATIONS
+            # -----------------------------
             C_back.to_excel(xl, sheet_name="E_Cum_Backtracked")
             mu_back.to_excel(xl, sheet_name="E_Inc_Backtracked")
+
+            # -----------------------------
+            # RESIDUALS
+            # -----------------------------
             R.to_excel(xl, sheet_name="Residuals")
+
+            # -----------------------------
+            # BOOTSTRAP ITERATIONS
+            # -----------------------------
             for k, Cstar in enumerate(sample_list):
-                Cstar.to_excel(xl, sheet_name=f"Iter{k+1}_CompletedCum")
+                Cstar.to_excel(
+                    xl,
+                    sheet_name=f"Iter{k+1}_CompletedCum"
+                )
+
+            # -----------------------------
+            # AGGREGATED RESULTS
+            # -----------------------------
             _mk(mean_cum).to_excel(xl, sheet_name="Mean_Cumulative")
             _mk(p50_cum).to_excel(xl, sheet_name="P50_Cumulative")
             _mk(p75_cum).to_excel(xl, sheet_name="P75_Cumulative")
             _mk(p95_cum).to_excel(xl, sheet_name="P95_Cumulative")
 
+        buffer.seek(0)
+        report_bytes = buffer.getvalue()
+
     # -----------------------------
     # Return selected triangle
     # -----------------------------
     m = (Mode or "").strip().upper()
+
     if m in {"MEAN", "MED"}:
-        return _mk(mean_cum)
+        return _mk(mean_cum), report_bytes
     if m in {"P50", "50"}:
-        return _mk(p50_cum)
+        return _mk(p50_cum), report_bytes
     if m in {"P75", "75"}:
-        return _mk(p75_cum)
+        return _mk(p75_cum), report_bytes
     if m in {"P95", "95"}:
-        return _mk(p95_cum)
-    return _mk(p50_cum)
+        return _mk(p95_cum), report_bytes
+
+    return _mk(p50_cum), report_bytes
+
+result = _call_with_signature(func, df, params)
+
+if isinstance(result, tuple):
+    pred_full_raw, bootstrap_bytes = result
+    st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
+    st.session_state.BOOTSTRAP_REPORTS[st.session_state.chosen_method] = bootstrap_bytes
+else:
+    pred_full_raw = result
 
 
 # =========================================================
@@ -470,9 +512,6 @@ import warnings
 import streamlit as st
 
 
-# fallback if not set
-SAVE_DIR = Path(st.session_state.get("REPORT_SAVE_DIR", Path.home() / "Downloads"))
-  # forced report path
 
 
 # =========================================================
@@ -485,7 +524,7 @@ import pandas as pd
 import statsmodels.api as sm
 import warnings
 
-SAVE_DIR = Path(r"C:\Users\pc\Downloads")
+
 
 
 def Poissonbootstrap(
@@ -531,7 +570,7 @@ def Poissonbootstrap(
     MU_FLOOR = 1e-6
     RIDGE_ALPHA = 1e-8
     MAXITER = 400
-    SAVE_DIR.mkdir(parents=True, exist_ok=True)
+  
     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
     # -----------------------------
@@ -726,49 +765,57 @@ def Poissonbootstrap(
     # -----------------------------
     # Excel Report
     # -----------------------------
+    report_bytes = None
+
     if Report:
-        fname = _sanitize_name(report_name or "Poisson_Bootstrap_Report", "Poisson_Bootstrap_Report")
-        out_path = SAVE_DIR / f"{fname}.xlsx"
+        buffer = io.BytesIO()
+        try:
+            writer = pd.ExcelWriter(
+                buffer,
+                engine="xlsxwriter",
+                engine_kwargs={"options": {"strings_to_numbers": True}}
+            )
+        except Exception:
+            writer = pd.ExcelWriter(buffer, engine="openpyxl")
 
-        def _make_writer(p: Path):
-            try:
-                return pd.ExcelWriter(p, engine="xlsxwriter",
-                    engine_kwargs={"options": {"strings_to_numbers": True}})
-            except Exception:
-                return pd.ExcelWriter(p, engine="openpyxl")
-
-        with _make_writer(out_path) as xl:
+        with writer as xl:
             meta = pd.DataFrame({
                 "B": [B], "seed": [seed], "phi_base": [phi_base],
                 "zero_future_tol": [zero_future_tol], "lam_cap": [lam_cap],
                 "mu_floor": [MU_FLOOR], "ridge_alpha": [RIDGE_ALPHA]
             })
             meta.to_excel(xl, sheet_name="Meta", index=False)
-            # ensure clean, full-shape incremental
+
             tri_inc_full = pd.DataFrame(tri_inc.to_numpy(), index=idx_ay, columns=cols_dev)
             tri_inc_full.to_excel(xl, sheet_name="Input_Incremental")
+
             for i, C in enumerate(sample_list):
                 C.to_excel(xl, sheet_name=f"Iter{i+1}_Cum")
+
             mk(mean_cum).to_excel(xl, sheet_name="Mean_Cumulative")
             mk(p50_cum).to_excel(xl, sheet_name="P50_Cumulative")
             mk(p75_cum).to_excel(xl, sheet_name="P75_Cumulative")
             mk(p99_cum).to_excel(xl, sheet_name="P99_Cumulative")
-        if debug:
-            print(f"[DEBUG] Report saved to {out_path}")
 
-    # -----------------------------
-    # Return Selected Mode
-    # -----------------------------
-    mode = (Mode or "").upper()
-    if mode in {"MEAN", "MED"}:
-        return mk(mean_cum)
-    if mode in {"P50", "50"}:
-        return mk(p50_cum)
-    if mode in {"P75", "75"}:
-        return mk(p75_cum)
-    if mode in {"P99", "99"}:
-        return mk(p99_cum)
-    return mk(p50_cum)
+        buffer.seek(0)
+        report_bytes = buffer.getvalue()
+        # -----------------------------
+        # Return Selected Mode
+        # -----------------------------
+        mode = (Mode or "").upper()
+
+        if mode in {"MEAN", "MED"}:
+            out = mk(mean_cum)
+        elif mode in {"P50", "50"}:
+            out = mk(p50_cum)
+        elif mode in {"P75", "75"}:
+            out = mk(p75_cum)
+        elif mode in {"P99", "99"}:
+            out = mk(p99_cum)
+        else:
+            out = mk(p50_cum)
+
+        return out, report_bytes
 
 
 

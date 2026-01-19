@@ -3,16 +3,6 @@ from __future__ import annotations
 import logging, warnings
 
 
-def browse_folder_dialog():
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()  # hide the small empty window
-    root.attributes('-topmost', True)  # make sure it opens in front
-    folder_selected = filedialog.askdirectory(title="Select Folder to Save Reports")
-    root.destroy()
-    return folder_selected or None
 
 # Cover the whole Streamlit logger tree (some versions use parent loggers)
 for name in (
@@ -378,33 +368,56 @@ def _call_with_signature(func, df_in: pd.DataFrame, params: dict | None = None) 
 def _call_method(func, df_cut: pd.DataFrame, name: str | None = None) -> pd.DataFrame:
     """
     Call an external completion method on a CLEAN triangle.
-    - Supplies a writable float64 frame.
-    - Filters kwargs to only what the target function supports.
+
+    Guarantees:
+    - Always returns a pandas DataFrame (completed triangle)
+    - Correctly handles bootstrap methods returning (df, bytes)
+    - Stores bootstrap Excel bytes in st.session_state["BOOTSTRAP_REPORTS"]
+    - Supplies a writable float64 frame
+    - Filters kwargs to only what the target function supports
     """
+
+    # --- Prepare writable input
     df_in = _make_writable_df(df_cut)
 
-    # If Poissonbootstrap expects incremental, adapt here
-    #if name == "Poissonbootstrap":
-     #   df_in = _ensure_incremental(df_in)
+    # Poisson bootstrap expects incremental triangle
+    if name == "Poissonbootstrap":
+        df_in = _ensure_incremental(df_in)
 
+    # --- Fetch method parameters
     cfgs = st.session_state.get("METHOD_CONFIGS", {})
     params = dict(cfgs.get(name or "", {})) if isinstance(cfgs, dict) else {}
+
+    # Chain Ladder Bootstrap default
     if name == "ChainLadderBootstrap":
         params.setdefault("Mode", "Med")
 
+    # --- Call method safely
     with pd.option_context("mode.copy_on_write", False):
         try:
-            out_df = _call_with_signature(func, df_in, params)
+            out = _call_with_signature(func, df_in, params)
         except (ValueError, TypeError) as e:
             msg = str(e).lower()
             if "read-only" in msg or "assignment destination is read-only" in msg:
-                out_df = _call_with_signature(func, _make_writable_df(df_cut), params)
+                out = _call_with_signature(func, _make_writable_df(df_cut), params)
             else:
                 raise
 
-    if not isinstance(out_df, pd.DataFrame):
-        raise TypeError("Method did not return a DataFrame")
+    # --- Handle bootstrap tuple return
+    if isinstance(out, tuple):
+        out_df, report_bytes = out
 
+        if report_bytes is not None:
+            st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
+            st.session_state.BOOTSTRAP_REPORTS[name] = report_bytes
+    else:
+        out_df = out
+
+    # --- Validate output
+    if not isinstance(out_df, pd.DataFrame):
+        raise TypeError(f"Method '{name}' did not return a DataFrame")
+
+    # --- Normalize index & columns
     return _coerce_age_columns(_coerce_index_to_int(out_df))
 
 def _run_methods_parallel(df_cut: pd.DataFrame, method_names: list[str]) -> dict[str, pd.DataFrame]:
@@ -992,16 +1005,7 @@ if file:
         )
         st.sidebar.header("📂 Report Output")
 
-        if st.sidebar.button("Browse Folder"):
-            selected = browse_folder_dialog()
-            if selected:
-                st.session_state["REPORT_SAVE_DIR"] = Path(selected)
-                st.sidebar.success(f"Reports will be saved to:\n{selected}")
-            else:
-                st.sidebar.warning("No folder selected.")
-        else:
-            # Default to Downloads if nothing selected
-            st.session_state.setdefault("REPORT_SAVE_DIR", Path.home() / "Downloads")
+        
 
         selected_methods, _method_cfgs = render_methods_ui([m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))])
 
@@ -1136,11 +1140,19 @@ if file:
                 #base_for_method = _ensure_incremental(base) if st.session_state.chosen_method == "Poissonbootstrap" else base
                 base_for_method = base
                 with pd.option_context("mode.copy_on_write", False):
-                    pred_full_raw = _call_with_signature(
-                        func,
-                        _make_writable_df(base_for_method),
-                        st.session_state.get("METHOD_CONFIGS", {}).get(st.session_state.chosen_method, {})
-                    )
+                    out = _call_with_signature(
+                    func,
+                    _make_writable_df(base_for_method),
+                    st.session_state.get("METHOD_CONFIGS", {}).get(st.session_state.chosen_method, {})
+                )
+
+                if isinstance(out, tuple):
+                    pred_full_raw, report_bytes = out
+                    if report_bytes is not None:
+                        st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
+                        st.session_state.BOOTSTRAP_REPORTS[st.session_state.chosen_method] = report_bytes
+                else:
+                    pred_full_raw = out
                 # Re-coerce and align to base cumulative grid
                 pred_full = _coerce_age_columns(_coerce_index_to_int(pred_full_raw)).reindex(index=base.index, columns=base.columns)
 
@@ -1188,6 +1200,7 @@ if file:
                 st.error(f"Failed to build report: {e}")
                 st.stop()
 
+
             st.success(f"Report ready! Pages: Meta + {('Method_Scores, ' if not method_scores.empty else '')}"
                        f"{len(cuts)} cut sheets + {len(selected_methods)} method grids.")
             download_base = _sanitize_filename(report_name or "Ultime_Report")
@@ -1197,5 +1210,22 @@ if file:
                 file_name=f"{download_base}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+            bootstrap_reports = st.session_state.get("BOOTSTRAP_REPORTS", {})
+
+            if "Poissonbootstrap" in bootstrap_reports:
+                st.download_button(
+                    "📊 Download Poisson Bootstrap Report",
+                    data=bootstrap_reports["Poissonbootstrap"],
+                    file_name="Poisson_Bootstrap_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
+            if "ChainLadderBootstrap" in bootstrap_reports:
+                st.download_button(
+                    "📈 Download Chain Ladder Bootstrap Report",
+                    data=bootstrap_reports["ChainLadderBootstrap"],
+                    file_name="ChainLadder_Bootstrap_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
 else:
     st.info("Upload an Excel file to begin.")
