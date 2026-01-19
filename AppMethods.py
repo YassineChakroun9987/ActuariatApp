@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import io
 import math
 import itertools
 from typing import Literal
@@ -267,15 +268,6 @@ def ChainLadderBootstrap(
         return _mk(p95_cum), report_bytes
 
     return _mk(p50_cum), report_bytes
-
-result = _call_with_signature(func, df, params)
-
-if isinstance(result, tuple):
-    pred_full_raw, bootstrap_bytes = result
-    st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
-    st.session_state.BOOTSTRAP_REPORTS[st.session_state.chosen_method] = bootstrap_bytes
-else:
-    pred_full_raw = result
 
 
 # =========================================================
@@ -779,23 +771,22 @@ def Poissonbootstrap(
 
         buffer.seek(0)
         report_bytes = buffer.getvalue()
-        # -----------------------------
-        # Return Selected Mode
-        # -----------------------------
-        mode = (Mode or "").upper()
+    
+    # Return Selected Mode (moved outside if block)
+    mode = (Mode or "").upper()
 
-        if mode in {"MEAN", "MED"}:
-            out = mk(mean_cum)
-        elif mode in {"P50", "50"}:
-            out = mk(p50_cum)
-        elif mode in {"P75", "75"}:
-            out = mk(p75_cum)
-        elif mode in {"P99", "99"}:
-            out = mk(p99_cum)
-        else:
-            out = mk(p50_cum)
+    if mode in {"MEAN", "MED"}:
+        out = mk(mean_cum)
+    elif mode in {"P50", "50"}:
+        out = mk(p50_cum)
+    elif mode in {"P75", "75"}:
+        out = mk(p75_cum)
+    elif mode in {"P99", "99"}:
+        out = mk(p99_cum)
+    else:
+        out = mk(p50_cum)
 
-        return out, report_bytes
+    return out, report_bytes
 
 
 
