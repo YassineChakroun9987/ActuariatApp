@@ -1284,3 +1284,11 @@ def combinaison(df: pd.DataFrame) -> pd.DataFrame:
             completed.at[e, t_age] = pred
 
     return completed
+
+
+# =========================================================
+# Bornhuetter-Ferguson (using loss ratio from premiums)
+# =========================================================
+
+
+

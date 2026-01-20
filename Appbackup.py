@@ -145,430 +145,117 @@ METHOD_META = {
 # =========================
 # THEME / CSS
 # =========================
-def _init_theme_state():
-    """Initialize theme state on first run, using system preference if available."""
-    if "theme_mode" not in st.session_state:
-        # Inject JavaScript to detect Windows/browser system preference
-        st.markdown(
-            """
-            <script>
-            (function() {
-              // Check browser's computed preference (works with Windows dark mode)
-              const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-              const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-              
-              // Get or set localStorage key
-              const storageKey = 'g3m_theme_mode';
-              let theme = localStorage.getItem(storageKey);
-              
-              // If first time or no saved preference, use system preference
-              if (!theme) {
-                theme = prefersDark ? 'dark' : 'light';
-              }
-              
-              // Always save to localStorage for persistence
-              localStorage.setItem(storageKey, theme);
-              
-              // Store globally for Streamlit to pick up
-              window.g3m_system_theme = theme;
-              
-              // Also try to inject via data attribute
-              document.documentElement.setAttribute('data-g3m-theme', theme);
-            })();
-            </script>
-            """,
-            unsafe_allow_html=True,
-        )
-        
-        # Try to detect from JavaScript, default to light if dark mode not detected
-        # This will pick up the theme from the script above
-        st.session_state.theme_mode = "dark"  # Will be overridden by JS below if light mode is system default
-
-def _get_theme_colors(mode: str) -> dict:
-    """Return color palette based on theme mode."""
-    if mode == "light":
-        return {
-            "primary": "#2F7ED8",
-            "accent": "#F4A300",
-            "bg": "#F4F7FB",
-            "surface": "#FFFFFF",
-            "surface_alt": "#F8FAFC",
-            "text": "#1E293B",
-            "muted": "#6B7280",
-            "border": "#E2E8F0",
-            "border_input": "#E5E7EB",
-            "success": "#3CB371",
-            "warning": "#E6B800",
-            "error": "#E5533D",
-            "table_header_bg": "rgba(47,126,216,0.10)",
-            "table_header_text": "#2F7ED8",
-            "table_alt_row": "#F8FAFC",
-            "sidebar_border": "#E8EEF7",
-        }
-    else:  # dark mode
-        return {
-            "primary": "#2F7ED8",
-            "accent": "#F4A300",
-            "bg": "#0B1320",
-            "surface": "#111A2E",
-            "surface_alt": "#0E172A",
-            "text": "#EAF2FF",
-            "muted": "#9FB0C8",
-            "border": "#1F2A40",
-            "border_input": "#1F2A40",
-            "success": "#3CB371",
-            "warning": "#E6B800",
-            "error": "#E5533D",
-            "table_header_bg": "rgba(47,126,216,0.12)",
-            "table_header_text": "#2F7ED8",
-            "table_alt_row": "#0E172A",
-        }
-
-def _inject_brand_css(colors: dict):
-    """Inject theme CSS with dynamic colors."""
+def _inject_brand_css(
+    primary="#3AA4FF",
+    accent="#F4A300",
+    bg="#0B1320",
+    surface="#111A2E",
+    surface_alt="#0E172A",
+    text="#EAF2FF",
+):
     st.markdown(
         f"""
         <style>
         :root {{
-          --g3m-primary:{colors['primary']};
-          --g3m-accent:{colors['accent']};
-          --g3m-bg:{colors['bg']};
-          --g3m-surface:{colors['surface']};
-          --g3m-surface-alt:{colors['surface_alt']};
-          --g3m-text:{colors['text']};
-          --g3m-muted:{colors['muted']};
-          --g3m-border:{colors['border']};
-          --g3m-border-input:{colors.get('border_input', colors['border'])};
-          --g3m-success:{colors['success']};
-          --g3m-warning:{colors['warning']};
-          --g3m-error:{colors['error']};
-          --g3m-table-header-bg:{colors.get('table_header_bg', 'rgba(47,126,216,0.12)')};
-          --g3m-table-header-text:{colors.get('table_header_text', '#2F7ED8')};
-          --g3m-table-alt-row:{colors.get('table_alt_row', '#0E172A')};
-          --g3m-sidebar-border:{colors.get('sidebar_border', '#E8EEF7')};
+          --g3m-primary:{primary};
+          --g3m-accent:{accent};
+          --g3m-bg:{bg};
+          --g3m-surface:{surface};
+          --g3m-surface-alt:{surface_alt};
+          --g3m-text:{text};
+          --g3m-muted:#A4B1C7;
+          --g3m-border:#1F2A40;
         }}
-        
         html, body, .stApp, section.main, .block-container {{
           background: var(--g3m-bg) !important;
           color: var(--g3m-text) !important;
         }}
-        
-        /* Base text color – scoped, safe (not global) */
-        .stMarkdown, 
-        .stText, 
-        .stCaption,
-        .stHeader,
-        .stSubheader,
-        label,
-        p {{
-          color: var(--g3m-text);
-        }}
-        
+        .stApp *:not/svg*:not/path* {{ color: var(--g3m-text) !important; }}
         [data-testid="stSidebar"] > div:first-child {{
           background: var(--g3m-surface) !important;
-          border-right: 1px solid var(--g3m-sidebar-border) !important;
+          border-right: 1px solid var(--g3m-border);
         }}
-        
-        /* Phase structure with improved vertical rhythm */
-        .g3m-phase {{
-          margin-bottom: 2.5rem;
-          margin-top: 0.5rem;
-        }}
-        
-        .g3m-phase h3 {{
-          margin-top: 1.5rem;
-          margin-bottom: 0.25rem;
-          letter-spacing: 0.01em;
-        }}
-        
-        /* Cards: intentional, layered appearance */
         .g3m-card {{
-          padding: 1.5rem;
+          padding: 1rem 1.25rem;
           background: var(--g3m-surface);
           border: 1px solid var(--g3m-border);
-          border-left: 5px solid var(--g3m-accent);
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-          margin-bottom: 1.25rem;
+          border-left: 6px solid var(--g3m-accent);
+          border-radius:14px;
+          box-shadow: 0 6px 18px rgba(0,0,0,.35);
+          margin-bottom:.85rem;
         }}
-        
-        .g3m-card strong {{
-          color: var(--g3m-primary);
-        }}
-        
-        /* Inputs: embedded, not floating */
         .stTextInput input, .stNumberInput input,
         .stTextArea textarea,
-        .stDateInput input, .stTimeInput input {{
-          background: var(--g3m-surface) !important;
-          border: 1px solid #E5E7EB !important;
-          border-radius: 8px !important;
-          color: var(--g3m-text) !important;
-          font-size: 0.95rem !important;
-          padding: 0.75rem 0.875rem !important;
-        }}
-        
-        /* Selectbox containers - style only the wrapper, not the input */
+        .stDateInput input, .stTimeInput input,
         .stSelectbox div[data-baseweb="select"] > div,
         .stMultiSelect div[data-baseweb="select"] > div {{
-          background: var(--g3m-surface) !important;
-          border: 1px solid #E5E7EB !important;
-          border-radius: 8px !important;
-          padding: 0 !important;
+          background: var(--g3m-surface-alt) !important;
+          border: 1px solid var(--g3m-border) !important;
+          border-radius: 10px !important;
         }}
-        
-        .stTextInput input:focus, .stNumberInput input:focus,
-        .stTextArea textarea:focus,
-        .stDateInput input:focus, .stTimeInput input:focus,
-        .stSelectbox div[data-baseweb="select"] > div:focus,
-        .stMultiSelect div[data-baseweb="select"] > div:focus {{
-          border-color: var(--g3m-primary) !important;
-          box-shadow: none !important;
-          outline: none !important;
+        input::placeholder, textarea::placeholder {{ color:#8CA0BC !important; opacity:1 !important; }}
+        input[type="radio"], input[type="checkbox"], input[type="range"] {{ accent-color: var(--g3m-accent) !important; }}
+
+        .stButton>button[kind="primary"], .stDownloadButton>button {{
+          color:#0B1320 !important; font-weight:800; border-radius:10px; text-shadow:none;
         }}
-        
-        input::placeholder, textarea::placeholder {{ 
-          color: #A0AEC0 !important; 
-          opacity: 1 !important; 
-        }}
-        
-        /* FIX: make selected value visible in selectbox (light & dark) */
-        [data-baseweb="select"] input {{
-          color: var(--g3m-text) !important;
-          background-color: transparent !important;
-          z-index: 2 !important;
-          padding: 0.75rem 0.875rem !important;
-          font-size: 0.95rem !important;
-        }}
-        
-        /* Target the text content directly in BaseWeb select */
-        [data-baseweb="select"] {{
-          color: var(--g3m-text) !important;
-        }}
-        
-        [data-baseweb="select"] * {{
-          color: var(--g3m-text) !important;
-        }}
-        
-        .stSelectbox [data-baseweb="select"] {{
-          color: var(--g3m-text) !important;
-        }}
-        
-        .stSelectbox [data-baseweb="select"] input {{
-          color: var(--g3m-text) !important;
-          caret-color: var(--g3m-text) !important;
-          padding: 0.75rem 0.875rem !important;
-          font-size: 0.95rem !important;
-        }}
-        
-        .stSelectbox [data-baseweb="select"] * {{
-          color: var(--g3m-text) !important;
-        }}
-        
-        /* Force visible text in select value display */
-        .stSelectbox input {{
-          color: var(--g3m-text) !important;
-          caret-color: var(--g3m-text) !important;
-        }}
-        
-        /* Placeholder style in selectbox */
-        [data-baseweb="select"] input::placeholder {{
-          color: var(--g3m-muted) !important;
-          opacity: 1 !important;
-        }}
-        
-        /* Dropdown menu styling */
-        [data-baseweb="menu"] {{
-          background: var(--g3m-surface) !important;
-        }}
-        
-        [data-baseweb="menu"] li {{
-          color: var(--g3m-text) !important;
-        }}
-        
-        [data-baseweb="menu"] li:hover {{
-          background: rgba(47,126,216,0.10) !important;
-          color: var(--g3m-text) !important;
-        }}
-        
-        input[type="radio"], input[type="checkbox"], input[type="range"] {{ 
-          accent-color: var(--g3m-accent) !important; 
-        }}
-        
-        /* Buttons: professional, intentional */
         .stButton>button[kind="primary"] {{
-          background: var(--g3m-primary) !important;
-          color: #FFFFFF !important;
-          font-weight: 700;
-          border-radius: 8px;
-          text-shadow: none;
-          border: none;
-          transition: none;
-          padding: 0.625rem 1.25rem !important;
+          background: var(--g3m-primary) !important; border-color: var(--g3m-primary) !important;
         }}
-        
-        .stButton>button[kind="primary"]:hover {{
-          filter: brightness(1.05);
-          background: var(--g3m-primary) !important;
-          color: #FFFFFF !important;
-        }}
-        
         .stDownloadButton>button {{
-          background: var(--g3m-accent) !important;
-          color: #1E293B !important;
-          font-weight: 700;
-          border-radius: 8px;
-          text-shadow: none;
-          border: none;
-          transition: none;
-          padding: 0.625rem 1.25rem !important;
+          background: var(--g3m-accent) !important; border-color: var(--g3m-accent) !important;
         }}
-        
-        .stDownloadButton>button:hover {{
-          filter: brightness(1.04);
-          background: var(--g3m-accent) !important;
-          color: #1E293B !important;
-        }}
-        
-        /* File upload: premium drop zone */
+        .stButton>button[kind="primary"]:hover {{ filter: brightness(1.06); box-shadow: 0 6px 20px rgba(58,164,255,.35); }}
+        .stDownloadButton>button:hover {{ filter: brightness(1.05); box-shadow: 0 6px 20px rgba(244,163,0,.35); }}
+
         [data-testid="stFileUploaderDropzone"] {{
           background: var(--g3m-surface-alt) !important;
-          border: 1px solid #E5E7EB !important;
-          border-radius: 12px !important;
-          padding: 2rem 1rem !important;
+          border: 2px dashed rgba(58,164,255,.45) !important;
+          border-radius: 14px !important;
         }}
-        
         [data-testid="stFileUploader"] button {{
-          background: var(--g3m-primary) !important;
-          border-color: var(--g3m-primary) !important;
-          color: white !important;
-          border-radius: 8px !important;
-          font-weight: 700 !important;
-          padding: 0.625rem 1rem !important;
+          background: var(--g3m-primary) !important; border-color: var(--g3m-primary) !important;
+          color:#0B1320 !important; border-radius:10px !important; font-weight:800;
         }}
-        
-        /* Tags in multiselect */
+
         .stMultiSelect [data-baseweb="tag"] {{
-          background: rgba(47, 126, 216, 0.12) !important;
-          border-color: rgba(47, 126, 216, 0.30) !important;
+          background: rgba(58,164,255,.15) !important;
+          border-color: rgba(58,164,255,.35) !important;
           color: var(--g3m-text) !important;
         }}
-        
-        /* Tables: Excel-like, professional appearance */
-        .stDataFrame div[role="table"] {{
-          background: var(--g3m-surface) !important;
-          font-size: 0.9rem !important;
-        }}
-        
+
         .stDataFrame div[role="table"] thead th {{
-          background: var(--g3m-table-header-bg) !important;
-          color: var(--g3m-table-header-text) !important;
-          font-weight: 700 !important;
-          border-bottom: 2px solid var(--g3m-primary) !important;
-          border-right: 1px solid #E5E7EB !important;
-          padding: 0.875rem 0.75rem !important;
-          text-align: left;
+          background: rgba(58,164,255,.12) !important; color: var(--g3m-text) !important;
         }}
-        
-        .stDataFrame div[role="table"] tbody tr {{
-          border-bottom: 1px solid #F0F0F0 !important;
-          height: 2.5rem;
-        }}
-        
-        .stDataFrame div[role="table"] tbody tr:nth-child(even) {{
-          background: var(--g3m-table-alt-row) !important;
-        }}
-        
-        .stDataFrame div[role="table"] tbody td {{
-          border-right: 1px solid #F0F0F0 !important;
-          padding: 0.875rem 0.75rem !important;
-          color: var(--g3m-text) !important;
-        }}
-        
-        /* Typography and semantic colors */
-        h1 {{ 
-          color: var(--g3m-primary) !important;
-          font-weight: 900 !important;
-          letter-spacing: 0.01em;
-        }}
-        
-        h2, h3, h4 {{ 
-          color: var(--g3m-primary) !important;
-          font-weight: 700 !important;
-        }}
-        
-        .g3m-muted {{ 
-          color: #9CA3AF !important; 
-          font-size: 0.9rem !important;
-        }}
-        
-        .g3m-success {{ 
-          color: var(--g3m-success) !important; 
-          font-weight: 600;
-        }}
-        
-        .g3m-warning {{ 
-          color: var(--g3m-warning) !important; 
-          font-weight: 600;
-        }}
-        
-        .g3m-error {{ 
-          color: var(--g3m-error) !important; 
-          font-weight: 600;
-        }}
+        h1,h2,h3,h4 {{ color: var(--g3m-primary) !important; }}
+        .g3m-muted {{ color: var(--g3m-muted) !important; }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 def _brand_header():
-    _init_theme_state()
-    
-    # Inject JavaScript to read system theme from localStorage and apply it
-    script = """
-    <script>
-    (function() {
-      const storageKey = 'g3m_theme_mode';
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      
-      // Read from localStorage, or detect from system preference
-      let theme = localStorage.getItem(storageKey);
-      if (!theme) {
-        theme = prefersDark ? 'dark' : 'light';
-        localStorage.setItem(storageKey, theme);
-      }
-      
-      // Store for Python to access on next rerun
-      window.g3m_system_theme = theme;
-    })();
-    </script>
-    """
-    st.markdown(script, unsafe_allow_html=True)
-    
-    colors = _get_theme_colors(st.session_state.theme_mode)
-    _inject_brand_css(colors)
-    
-    left, center, right = st.columns([1, 3, 1])
-    
-    with left:
-        st.image("g3m.png", width=150)
-    
-    with center:
-        st.markdown(
-            f"""
-            <div style="font-weight:900;font-size:1.6rem;color:{colors['text']};letter-spacing:.02em;">G3M <span style="color:{colors['accent']};">CONSULTING</span></div>
-            <div style="color:{colors['muted']};font-size:0.85rem;">Mesurer vos risques…Minimiser leurs impacts</div>
-            """,
+    _inject_brand_css()
+    left, right = st.columns([1, 4])
+    logo_paths = ["logo.png", "g3m_logo.png", "g3m.png"]
+    shown = False
+    for p in logo_paths:
+        if Path(p).exists():
+            left.image(p, width=78)
+            shown = True
+            break
+    if not shown:
+        left.markdown(
+            "<div style='width:78px;height:78px;border-radius:50%;border:6px solid #F4A300;display:flex;align-items:center;justify-content:center;color:#3AA4FF;font-weight:900;font-size:26px;background:#0B1320;'>G3M</div>",
             unsafe_allow_html=True,
         )
-    
-    with right:
-        def _toggle_theme():
-            st.session_state.theme_mode = "light" if st.session_state.theme_mode == "dark" else "dark"
-        
-        theme_icon = "🌙" if st.session_state.theme_mode == "dark" else "☀️"
-        
-        st.button(theme_icon, key="theme_toggle", on_click=_toggle_theme)
+    right.markdown(
+        """
+        <div style="font-weight:900;font-size:1.6rem;color:#EAF2FF;letter-spacing:.02em;">G3M <span style="color:#F4A300;">CONSULTING</span></div>
+        <div class="g3m-muted">Ultime Stability • Assumptions • Completion • Excel Reports</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # =========================
 # DATA COERCION (Optimized)
@@ -1308,169 +995,16 @@ def _build_excel_report(
     return buffer.getvalue()
 
 # =========================
-# APP UI (Ultime only) — 5-PHASE WORKFLOW
+# APP UI (Ultime only)
 # =========================
 _brand_header()
 
-# ============================================================================
-# PHASE 1: DATA INTAKE
-# ============================================================================
-st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
-st.markdown("### Phase 1: Data Intake")
-st.markdown('<span class="g3m-muted">Upload and validate your loss triangle</span>', unsafe_allow_html=True)
-
 file = st.file_uploader("Drop your Excel file (.xlsx)", type=["xlsx"], accept_multiple_files=False)
-
-if not file:
-    st.info("Upload an Excel file to begin.")
-    st.stop()
-
-file_bytes = file.read()
-try:
-    sheets = _read_excel_sheets(file_bytes)
-except Exception as e:
-    st.error(f"Couldn't read sheets: {e}")
-    st.stop()
-
-with st.container():
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        sheet = st.selectbox("Sheet", options=sheets, index=0)
-    with col2:
-        triangle_type = st.radio("Type", ["Tableau des charges", "Tableau Cummulative"], index=0, horizontal=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-ibnr_label = "IBNR" if triangle_type == "Tableau des charges" else "SAP+IBNR"
-index_col = 0
-
-try:
-    df_raw = _read_sheet(file_bytes, sheet, index_col=index_col)
-except Exception as e:
-    st.error(f"Failed to read the selected sheet: {e}")
-    st.stop()
-
-with st.container():
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-    st.markdown("**Data Preview**")
-    _preview = df_raw.copy()
-    _preview.columns = _preview.columns.astype(str)
-    st.dataframe(_format_display(_preview.head(15)), use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Determine valid years early
-try:
-    full = _coerce_age_columns(_coerce_index_to_int(df_raw))
-    years = list(map(int, full.index.tolist()))
-    min_year = min(years); max_year = max(years)
-    valid_starts = [y for y in range(min_year, max_year)]
-    if not valid_starts:
-        st.error("Not enough years to run Ultime.")
-        st.stop()
-except Exception as e:
-    st.error(f"Unable to parse years: {e}")
-    st.stop()
-
-# ============================================================================
-# PHASE 2: ASSUMPTIONS VALIDATION
-# ============================================================================
-st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
-st.markdown("### Phase 2: Assumptions Validation")
-st.markdown('<span class="g3m-muted">Verify model conditions are met</span>', unsafe_allow_html=True)
-
-with st.sidebar:
-    st.header("Assumption Settings")
-    r2_threshold = st.number_input(
-        "R² threshold (Factors)",
-        min_value=0.0, max_value=1.0, value=0.95, step=0.01,
-        help="Higher = stricter stability requirements."
-    )
-    tail_factor = st.number_input(
-        "Tail factor",
-        min_value=0.0, value=1.0, step=0.01,
-        help="Development extension beyond observed triangle."
-    )
-    z_alpha_2 = st.number_input(
-        "Z (Calendar test)",
-        min_value=0.0, value=1.96, step=0.01,
-        help="Confidence level for calendar effect test."
-    )
-    tie_tol = st.number_input(
-        "Tie tolerance",
-        min_value=0.0, value=0.0, step=0.01
-    )
-
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-    st.markdown("**Factors Assumption**")
-    st.markdown('<span class="g3m-muted">R² stability test</span>', unsafe_allow_html=True)
-    if st.button("Validate Factors", key="btn_validate_factors", use_container_width=True):
-        with st.spinner("Testing factors R²..."):
-            try:
-                if AssumptionFactors is None:
-                    raise RuntimeError("AssumptionFactors module not found.")
-                factors_ok = AssumptionFactors(
-                    full,
-                    output_path="Correlation_Factors_Output2.xlsx",
-                    r2_threshold=float(r2_threshold),
-                    tail_factor=float(tail_factor),
-                    eps_denom=0.0
-                )
-                st.session_state.factors_ok = factors_ok
-            except Exception as e:
-                st.error(f"Test failed: {e}")
-                st.session_state.factors_ok = None
-    
-    if "factors_ok" in st.session_state:
-        if st.session_state.factors_ok is True:
-            st.markdown('<span class="g3m-success">✓ Accepted (R² ≥ threshold)</span>', unsafe_allow_html=True)
-        elif st.session_state.factors_ok is False:
-            st.markdown('<span class="g3m-error">✗ Rejected (R² < threshold)</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="g3m-muted">Not yet validated</span>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with col2:
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-    st.markdown("**Calendar Assumption**")
-    st.markdown('<span class="g3m-muted">Time effect hypothesis test</span>', unsafe_allow_html=True)
-    if st.button("Validate Calendar", key="btn_validate_calendar", use_container_width=True):
-        with st.spinner("Testing calendar effect..."):
-            try:
-                if AssumptionCalendar is None:
-                    raise RuntimeError("AssumptionCalendar module not found.")
-                calendar_ok = AssumptionCalendar(
-                    full,
-                    output_path="Calendar_Effect_Test2.xlsx",
-                    z_alpha_2=float(z_alpha_2),
-                    eps_denom=0.0,
-                    tie_tol=float(tie_tol)
-                )
-                st.session_state.calendar_ok = calendar_ok
-            except Exception as e:
-                st.error(f"Test failed: {e}")
-                st.session_state.calendar_ok = None
-    
-    if "calendar_ok" in st.session_state:
-        if st.session_state.calendar_ok is True:
-            st.markdown('<span class="g3m-success">✓ Accepted (Z in CI)</span>', unsafe_allow_html=True)
-        elif st.session_state.calendar_ok is False:
-            st.markdown('<span class="g3m-error">✗ Rejected (Z out CI)</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="g3m-muted">Not yet validated</span>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ============================================================================
-# PHASE 3: METHOD STRATEGY
-# ============================================================================
-st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
-st.markdown("### Phase 3: Method Strategy")
-st.markdown('<span class="g3m-muted">Select completion methods for analysis</span>', unsafe_allow_html=True)
+primes_file = st.file_uploader("(Optional) Upload Primes file (.xlsx) — 2 columns: Year, Premium", type=["xlsx"], accept_multiple_files=False, key="primes_upload")
 
 def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
+    st.subheader("Methods")
+    st.caption("Pick one or more methods. Click **Customize** on bootstrap methods to set simulations & report options.")
     configs = st.session_state.get("METHOD_CONFIGS", {})
     selected: list[str] = []
 
@@ -1478,26 +1012,31 @@ def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
         if not callable(globals().get(name, None)):
             continue
         meta = METHOD_META.get(name, {"title": name, "desc": ""})
-        st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-        cols = st.columns([0.75, 0.25])
-        with cols[0]:
-            st.markdown(f"**{meta['title']}**")
-            st.markdown(f"<span class='g3m-muted'>{meta.get('desc', '')}</span>", unsafe_allow_html=True)
-            pick = st.checkbox("Select", key=f"pick_{name}", value=(name in default_selected))
-        with cols[1]:
-            if name in ("Poissonbootstrap", "ChainLadderBootstrap"):
-                with st.expander("Settings", expanded=False):
-                    B_default = int(configs.get(name, {}).get("B", 200))
-                    include_default = bool(configs.get(name, {}).get("Report", False))
-                    rname_default = configs.get(name, {}).get(
-                        "report_name",
-                        "Poisson_Bootstrap_Report" if name == "Poissonbootstrap" else "CL_Bootstrap_Report"
-                    )
-                    B = st.number_input("Simulations", min_value=100, max_value=10000, step=100, value=B_default, key=f"B_{name}")
-                    include = st.checkbox("Include report", value=include_default, key=f"rep_{name}")
-                    rname = st.text_input("Name", value=rname_default, key=f"name_{name}")
-                    configs[name] = {"B": int(B), "Report": include, "report_name": rname}
-        st.markdown('</div>', unsafe_allow_html=True)
+        with st.container():
+            st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+            cols = st.columns([0.75, 0.25])
+            with cols[0]:
+                st.markdown(f"**{meta['title']}**")
+                if meta.get("desc"):
+                    st.markdown(f"<span style='color:#6b7280'>{meta['desc']}</span>", unsafe_allow_html=True)
+                pick = st.checkbox("Select", key=f"pick_{name}", value=(name in default_selected))
+            with cols[1]:
+                if name in ("Poissonbootstrap", "ChainLadderBootstrap"):
+
+                    with st.expander("⚙ Customize", expanded=False):
+                        B_default = int(configs.get(name, {}).get("B", 200))
+                        include_default = bool(configs.get(name, {}).get("Report", False))
+                        rname_default = configs.get(name, {}).get(
+                            "report_name",
+                            "Poisson_Bootstrap_Report" if name == "Poissonbootstrap" else "CL_Bootstrap_Report"
+                        )
+                        B = st.number_input("Simulations (B)", min_value=100, max_value=10000, step=100, value=B_default, key=f"B_{name}")
+                        include = st.checkbox("Include bootstrap report", value=include_default, key=f"rep_{name}")
+                        rname = st.text_input("Report name", value=rname_default, key=f"name_{name}")
+                        configs[name] = {"B": int(B), "Report": include, "report_name": rname}
+                else:
+                    st.markdown("&nbsp;")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         if pick:
             selected.append(name)
@@ -1505,230 +1044,307 @@ def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
     st.session_state.METHOD_CONFIGS = configs
     return selected, configs
 
-selected_methods, _method_cfgs = render_methods_ui([m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))])
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ============================================================================
-# PHASE 4: STABILITY & SELECTION
-# ============================================================================
-st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
-st.markdown("### Phase 4: Ultime Stability & Method Selection")
-st.markdown('<span class="g3m-muted">Analyze consistency across cut years</span>', unsafe_allow_html=True)
-
-with st.sidebar:
-    st.header("Ultime Settings")
-    ultime_start_year = st.selectbox(
-        "Start year for ultime analysis",
-        options=valid_starts,
-        index=max(0, len(valid_starts)//2)
-    )
-    ultime_decay_r = st.number_input(
-        "History decay (0<r≤1)",
-        min_value=0.01, max_value=1.0, value=0.85, step=0.01,
-        help="Weight on recent cuts vs historical."
-    )
-    selection_ay_weight = st.number_input(
-        "Closeness vs Stability",
-        min_value=0.0, max_value=1.0, value=0.70, step=0.05,
-        help="0=stability only, 1=closeness only."
-    )
-
-selection_ay = ultime_start_year
-
-run_clicked = st.button("Run Ultime Stability Analysis", type="primary", disabled=(len(selected_methods) == 0), use_container_width=True)
-
-best_method = None
-method_scores = pd.DataFrame()
-ultime_artifacts: dict[int, dict] = {}
-sequences = {}
-final_ultimes = pd.DataFrame()
-cuts: list[int] = []
-
-if run_clicked:
-    with st.spinner(f"Running Ultime stability analysis from {ultime_start_year} onwards..."):
-        try:
-            sequences, ultime_artifacts, final_ultimes, cuts = _cached_cached_ultime_cycle(
-                df_raw, selected_methods, int(ultime_start_year), decay_r=float(ultime_decay_r)
-            )
-            best_method, method_scores = _select_best_method(
-                sequences, cuts, int(selection_ay),
-                closeness_weight=float(selection_ay_weight),
-                decay_r=float(ultime_decay_r)
-            )
-        except Exception as e:
-            st.error(f"Ultime analysis failed: {e}")
-            st.stop()
-
-    if not method_scores.empty:
-        st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-        st.markdown("**Method Comparison Scores**")
-        st.markdown('<span class="g3m-muted">Lower scores indicate better stability and consistency</span>', unsafe_allow_html=True)
-        st.dataframe(_format_display(method_scores), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if best_method:
-        st.markdown(f'<div class="g3m-card" style="border-left-color:#3CB371"><span class="g3m-success">✓ Recommended: <strong>{best_method}</strong> for AY {selection_ay}</span></div>', unsafe_allow_html=True)
-    else:
-        st.info("No clear best method; select manually in Phase 5.")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ============================================================================
-# PHASE 5: REPORT GENERATION
-# ============================================================================
-st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
-st.markdown("### Phase 5: Report Generation")
-st.markdown('<span class="g3m-muted">Create and download finalized Excel report</span>', unsafe_allow_html=True)
-
-# Optional primes file for S/P ratio
-primes_file = st.file_uploader("(Optional) Primes file for S/P ratio (.xlsx)", type=["xlsx"], accept_multiple_files=False, key="primes_upload")
-if primes_file is not None:
+if file:
+    file_bytes = file.read()
     try:
-        primes_bytes = primes_file.read()
-        if primes_bytes:
-            primes_data = _read_and_validate_primes(primes_bytes)
-            if primes_data is not None and not primes_data.empty:
-                st.session_state.PRIMES_DATA = primes_data
-                st.success("✓ Primes file loaded")
-            else:
-                st.warning("Primes file is empty or invalid")
+        sheets = _read_excel_sheets(file_bytes)
     except Exception as e:
-        st.warning(f"Could not read primes: {e}")
-
-st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
-st.markdown("**Select Completion Method**")
-options_for_completion = selected_methods if selected_methods else [m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))]
-
-if "chosen_method" not in st.session_state:
-    st.session_state.chosen_method = None
-if "chosen_manually_set" not in st.session_state:
-    st.session_state.chosen_manually_set = False
-
-if best_method and not st.session_state.chosen_manually_set:
-    st.session_state.chosen_method = best_method if best_method in options_for_completion else (options_for_completion[0] if options_for_completion else None)
-
-def _mark_manual_choice():
-    st.session_state.chosen_manually_set = True
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    chosen = st.selectbox(
-        "Method",
-        options=options_for_completion,
-        index=options_for_completion.index(st.session_state.chosen_method) if st.session_state.chosen_method in options_for_completion else 0,
-        key="chosen_method_final",
-        on_change=_mark_manual_choice,
-    )
-with col2:
-    report_name = st.text_input("Filename", value="Ultime_Report", label_visibility="collapsed")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-build_clicked = st.button("Generate Report", type="primary", use_container_width=True)
-
-if build_clicked:
-    with st.spinner("Generating Excel report..."):
+        st.error(f"Couldn't read sheets: {e}")
+        st.stop()
+    
+    # Read primes file early if provided
+    if primes_file is not None:
         try:
-            func = globals().get(st.session_state.chosen_method or chosen, None)
-            if not callable(func):
-                raise ValueError(f"Selected method is not callable.")
-            base = _coerce_age_columns(_coerce_index_to_int(df_raw))
-            base_for_method = base
-
-            with pd.option_context("mode.copy_on_write", False):
-                out = _call_with_signature(
-                    func,
-                    _make_writable_df(base_for_method),
-                    st.session_state.get("METHOD_CONFIGS", {}).get(st.session_state.chosen_method or chosen, {})
-                )
-
-            if isinstance(out, tuple):
-                pred_full_raw, report_bytes = out
-                if report_bytes is not None:
-                    st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
-                    st.session_state.BOOTSTRAP_REPORTS[st.session_state.chosen_method or chosen] = report_bytes
-            else:
-                pred_full_raw = out
-
-            pred_full = _coerce_age_columns(_coerce_index_to_int(pred_full_raw)).reindex(index=base.index, columns=base.columns)
-            completed = base.copy()
-            mask = completed.isna() & pred_full.notna()
-            completed[mask] = pred_full[mask]
-            completed = completed.ffill(axis=1)
+            primes_bytes = primes_file.read()
+            if primes_bytes:
+                primes_data = _read_and_validate_primes(primes_bytes)
+                if primes_data is not None and not primes_data.empty:
+                    st.session_state.PRIMES_DATA = primes_data
+                    st.success("✅ Primes file loaded successfully")
+                else:
+                    st.warning("⚠️ Primes file is empty or invalid; S/P sheet and Bornhuetter-Ferguson will be skipped")
         except Exception as e:
-            st.error(f"Completion failed: {e}")
-            st.stop()
+            st.warning(f"Could not read primes file: {e}")
 
-        try:
-            if not cuts or not ultime_artifacts:
+    with st.container():
+        st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+        sheet = st.selectbox("Select sheet containing the triangle", options=sheets, index=0)
+        triangle_type = st.radio("Triangle type", ["Tableau des charges", "Tableau Cummulative"], index=0, horizontal=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    ibnr_label = "IBNR" if triangle_type == "Tableau des charges" else "SAP+IBNR"
+
+    with st.sidebar:
+        st.header("Options")
+        index_col = 0
+
+
+        st.subheader("Assumption thresholds")
+        r2_threshold = st.number_input(
+            "R² threshold (Factors)",
+            min_value=0.0, max_value=1.0, value=0.95, step=0.01,
+            help="Minimum acceptable R² value when testing factor stability. Higher = stricter filter; 0.95 means factors must explain at least 95% of variance."
+        )
+
+        tail_factor = st.number_input(
+            "Tail factor (Factors)",
+            min_value=0.0, value=1.0, step=0.01,
+            help="Final development multiplier applied beyond the observed triangle. 1.00 means no extra tail; >1.00 extends losses to account for unobserved development."
+        )
+
+        z_alpha_2 = st.number_input(
+            "Z (Calendar, two-sided)",
+            min_value=0.0, value=1.96, step=0.01,
+            help="Z-value used for the calendar (time) effect hypothesis test. 1.96 corresponds to a 95% confidence interval; higher values tighten the acceptance band."
+        )
+
+        tie_tol = st.number_input(
+            "Tie tolerance (Calendar)",
+            min_value=0.0, value=0.0, step=0.01,
+            help="Tolerance for ties when ranking calendar-period residuals. Use small values (e.g. 0.05) to reduce false positives in small samples."
+        )
+        st.subheader("Ultime settings")
+        ultime_decay_r = st.number_input(
+            "Ultime history decay r (0<r≤1; higher=more weight on recent cuts)",
+            min_value=0.01, max_value=1.0, value=0.85, step=0.01,
+            help="Exponential decay factor for weighting historical cuts. 0.85 means recent completions count 15% less each step backward."
+        )
+        selection_ay_weight = st.number_input(
+            "Closeness weight vs Stability (0..1)",
+            min_value=0.0, max_value=1.0, value=0.70, step=0.05,
+            help="0 → only stability, 1 → only closeness to final ultime for the chosen AY"
+        )
+        st.sidebar.header("📂 Report Output")
+
+        
+
+        selected_methods, _method_cfgs = render_methods_ui([m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))])
+
+    try:
+        df_raw = _read_sheet(file_bytes, sheet, index_col=index_col)
+    except Exception as e:
+        st.error(f"Failed to read the selected sheet: {e}")
+        st.stop()
+
+    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+    st.subheader("Preview")
+    _preview = df_raw.copy()
+    _preview.columns = _preview.columns.astype(str)
+    st.dataframe(_format_display(_preview.head(20)), width="stretch")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Determine valid years and selection AY
+    try:
+        full = _coerce_age_columns(_coerce_index_to_int(df_raw))
+        years = list(map(int, full.index.tolist()))
+        min_year = min(years); max_year = max(years)
+        valid_starts = [y for y in range(min_year, max_year)]
+        if not valid_starts:
+            st.error("Not enough years to run Ultime.")
+            st.stop()
+        ultime_start_year = st.selectbox("Select Ultime start year", options=valid_starts, index=max(0, len(valid_starts)//2))
+        ay_choices = [y for y in years if y <= ultime_start_year]
+        selection_ay = ultime_start_year
+    except Exception as e:
+        st.error(f"Unable to derive valid years: {e}")
+        st.stop()
+
+    run_clicked = st.button("🚀 Run Ultime Stability & Pick Best Method", type="primary", disabled=(len(selected_methods) == 0), width="stretch")
+
+    best_method = None
+    method_scores = pd.DataFrame()
+    ultime_artifacts: dict[int, dict] = {}
+    sequences = {}
+    final_ultimes = pd.DataFrame()
+    cuts: list[int] = []
+    if run_clicked:
+        with st.spinner("Validating assumptions..."):
+            factors_ok = None; calendar_ok = None
+            try:
+                if AssumptionFactors is None:
+                    raise RuntimeError("AssumptionFactors() not found. Ensure FinalHypotheseCorrFact.py is present.")
+                factors_ok = AssumptionFactors(
+                    _coerce_age_columns(_coerce_index_to_int(df_raw)),
+                    output_path="Correlation_Factors_Output2.xlsx",
+                    r2_threshold=float(r2_threshold), tail_factor=float(tail_factor), eps_denom=0.0
+                )
+            except Exception as e:
+                st.error(f"AssumptionFactors failed: {e}")
+            try:
+                if AssumptionCalendar is None:
+                    raise RuntimeError("AssumptionCalendar() not found. Ensure FinalHypotheseCadence.py is present.")
+                calendar_ok = AssumptionCalendar(
+                    _coerce_age_columns(_coerce_index_to_int(df_raw)),
+                    output_path="Calendar_Effect_Test2.xlsx",
+                    z_alpha_2=float(z_alpha_2), eps_denom=0.0, tie_tol=float(tie_tol)
+                )
+            except Exception as e:
+                st.error(f"AssumptionCalendar failed: {e}")
+
+        colA, colB = st.columns(2)
+        with colA:
+            st.subheader("Factors Assumption")
+            if factors_ok is True: st.success("✅ Accepted (R² checks passed)")
+            elif factors_ok is False: st.error("❌ Rejected (R² checks failed)")
+            else: st.warning("⚠️ Not available")
+        with colB:
+            st.subheader("Calendar Assumption")
+            if calendar_ok is True: st.success("✅ Accepted (Z within CI)")
+            elif calendar_ok is False: st.error("❌ Rejected (Z outside CI)")
+            else: st.warning("⚠️ Not available")
+
+        with st.spinner(f"Running Ultime stability from {ultime_start_year} to end (optimized)..."):
+            try:
                 sequences, ultime_artifacts, final_ultimes, cuts = _cached_cached_ultime_cycle(
                     df_raw, selected_methods, int(ultime_start_year), decay_r=float(ultime_decay_r)
                 )
-            if method_scores is None or method_scores.empty:
-                _, method_scores = _select_best_method(
+                best_method, method_scores = _select_best_method(
                     sequences, cuts, int(selection_ay),
                     closeness_weight=float(selection_ay_weight),
                     decay_r=float(ultime_decay_r)
                 )
-        except Exception as e:
-            st.error(f"Pre-build analysis failed: {e}")
-            st.stop()
+                st.subheader("Method selection scores (lower is better)")
+                st.dataframe(_format_display(method_scores), width="stretch")
+                if best_method:
+                    st.success(f"🏆 Chosen method: {best_method} (AY {selection_ay})")
+                else:
+                    st.warning("No best method identified; pick manually below.")
+            except Exception as e:
+                st.error(f"Ultime cycle failed: {e}")
 
-        try:
-            xlsx_bytes = _build_excel_report(
-                df_orig=df_raw,
-                completed_best=completed,
-                triangle_type=triangle_type,
-                ibnr_label=ibnr_label,
-                chosen_method=st.session_state.chosen_method or chosen,
-                ultime_start_year=int(ultime_start_year),
-                cuts=cuts,
-                selected_methods=selected_methods,
-                ultime_artifacts=ultime_artifacts,
-                method_scores=method_scores,
-                chosen_ay_for_selection=int(selection_ay),
-                primes_df=st.session_state.get("PRIMES_DATA"),
+    st.subheader("Choose method to complete the triangle")
+    options_for_completion = selected_methods if selected_methods else [m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))]
+
+    if "chosen_method" not in st.session_state:
+        st.session_state.chosen_method = None
+    if "chosen_manually_set" not in st.session_state:
+        st.session_state.chosen_manually_set = False
+    if best_method and not st.session_state.chosen_manually_set:
+        st.session_state.chosen_method = best_method if best_method in options_for_completion else (options_for_completion[0] if options_for_completion else None)
+
+    def _mark_manual_choice():
+        st.session_state.chosen_manually_set = True
+
+    chosen = st.selectbox(
+        "Completion method",
+        options=options_for_completion,
+        index=options_for_completion.index(st.session_state.chosen_method) if st.session_state.chosen_method in options_for_completion else 0,
+        key="chosen_method",
+        on_change=_mark_manual_choice,
+    )
+
+    st.markdown("---")
+    st.subheader("Generate Excel Report")
+    report_name = st.text_input("Output filename (without .xlsx)", value="Ultime_Report")
+    build_clicked = st.button("🧮 Complete Triangle & Build Beautiful Report", type="primary", width="stretch")
+
+    if build_clicked:
+        with st.spinner("Completing triangle and building the Excel report..."):
+            # 1) Complete with chosen method
+            try:
+                func = globals().get(st.session_state.chosen_method, None)
+                if not callable(func):
+                    raise ValueError(f"Selected method '{st.session_state.chosen_method}' is not callable.")
+                base = _coerce_age_columns(_coerce_index_to_int(df_raw))
+
+                # Convert for Poissonbootstrap (expects incremental)
+                #base_for_method = _ensure_incremental(base) if st.session_state.chosen_method == "Poissonbootstrap" else base
+                base_for_method = base
+                with pd.option_context("mode.copy_on_write", False):
+                    out = _call_with_signature(
+                    func,
+                    _make_writable_df(base_for_method),
+                    st.session_state.get("METHOD_CONFIGS", {}).get(st.session_state.chosen_method, {})
+                )
+
+                if isinstance(out, tuple):
+                    pred_full_raw, report_bytes = out
+                    if report_bytes is not None:
+                        st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
+                        st.session_state.BOOTSTRAP_REPORTS[st.session_state.chosen_method] = report_bytes
+                else:
+                    pred_full_raw = out
+                # Re-coerce and align to base cumulative grid
+                pred_full = _coerce_age_columns(_coerce_index_to_int(pred_full_raw)).reindex(index=base.index, columns=base.columns)
+
+                completed = base.copy()
+                # Fill only missing from predictions, then ffill across ages
+                mask = completed.isna() & pred_full.notna()
+                completed[mask] = pred_full[mask]
+                completed = completed.ffill(axis=1)
+            except Exception as e:
+                st.error(f"Completion failed with '{st.session_state.chosen_method}': {e}")
+                st.stop()
+
+            # 2) Ensure we have per-cut artifacts & cuts
+            try:
+                if not cuts or not ultime_artifacts:
+                    sequences, ultime_artifacts, final_ultimes, cuts = _cached_cached_ultime_cycle(
+                        df_raw, selected_methods, int(ultime_start_year), decay_r=float(ultime_decay_r)
+                    )
+                if method_scores is None or method_scores.empty:
+                    _, method_scores = _select_best_method(
+                        sequences, cuts, int(selection_ay),
+                        closeness_weight=float(selection_ay_weight),
+                        decay_r=float(ultime_decay_r)
+                    )
+            except Exception as e:
+                st.error(f"Pre-build ultime computations failed: {e}")
+                st.stop()
+
+            # 3) Build the workbook
+            try:
+                xlsx_bytes = _build_excel_report(
+                    df_orig=df_raw,
+                    completed_best=completed,
+                    triangle_type=triangle_type,
+                    ibnr_label=ibnr_label,
+                    chosen_method=st.session_state.chosen_method,
+                    ultime_start_year=int(ultime_start_year),
+                    cuts=cuts,
+                    selected_methods=selected_methods,
+                    ultime_artifacts=ultime_artifacts,
+                    method_scores=method_scores,
+                    chosen_ay_for_selection=int(selection_ay),
+                    primes_df=st.session_state.get("PRIMES_DATA"),
+                )
+            except Exception as e:
+                st.error(f"Failed to build report: {e}")
+                st.stop()
+
+
+            st.success(f"Report ready! Pages: Meta + {('Method_Scores, ' if not method_scores.empty else '')}"
+                       f"{len(cuts)} cut sheets + {len(selected_methods)} method grids.")
+            download_base = _sanitize_filename(report_name or "Ultime_Report")
+            st.download_button(
+                label="⬇️ Download Excel Report",
+                data=xlsx_bytes,
+                file_name=f"{download_base}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        except Exception as e:
-            st.error(f"Report generation failed: {e}")
-            st.stop()
+            
+            # Display bootstrap report download buttons if available
+            bootstrap_reports = st.session_state.get("BOOTSTRAP_REPORTS", {})
 
-        st.markdown('<div class="g3m-card" style="border-left-color:#3CB371">', unsafe_allow_html=True)
-        st.markdown("**Report Ready**")
-        st.markdown(f"✓ Completed with <strong>{st.session_state.chosen_method or chosen}</strong>")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        download_base = _sanitize_filename(report_name or "Ultime_Report")
-        st.download_button(
-            label="Download Excel Report",
-            data=xlsx_bytes,
-            file_name=f"{download_base}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="primary"
-        )
-
-        bootstrap_reports = st.session_state.get("BOOTSTRAP_REPORTS", {})
-        if bootstrap_reports:
-            st.markdown("---")
-            st.markdown("**Bootstrap Reports**")
+            if bootstrap_reports:
+                st.markdown("---")
+                st.subheader("📊 Bootstrap Reports")
+                
             if "Poissonbootstrap" in bootstrap_reports and bootstrap_reports["Poissonbootstrap"] is not None:
                 st.download_button(
-                    "Download Poisson Bootstrap Report",
+                    "📊 Download Poisson Bootstrap Report",
                     data=bootstrap_reports["Poissonbootstrap"],
                     file_name="Poisson_Bootstrap_Report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="poisson_dl",
-                    use_container_width=True
+                    key="poisson_dl"
                 )
+
             if "ChainLadderBootstrap" in bootstrap_reports and bootstrap_reports["ChainLadderBootstrap"] is not None:
                 st.download_button(
-                    "Download Chain Ladder Bootstrap Report",
+                    "📈 Download Chain Ladder Bootstrap Report",
                     data=bootstrap_reports["ChainLadderBootstrap"],
                     file_name="ChainLadder_Bootstrap_Report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="cl_dl",
-                    use_container_width=True
+                    key="cl_dl"
                 )
-
-st.markdown('</div>', unsafe_allow_html=True)
+else:
+    st.info("Upload an Excel file to begin.")
