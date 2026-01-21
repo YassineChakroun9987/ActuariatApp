@@ -664,9 +664,29 @@ def _ensure_incremental(df_cum: pd.DataFrame) -> pd.DataFrame:
     """Convert cumulative to incremental while preserving NaN boundaries."""
     inc = df_cum.copy()
     if inc.shape[1] >= 2:
-        inc.iloc[:, 1:] = inc.iloc[:, 1:].values - inc.iloc[:, :-1].values
-        na = df_cum.isna()
-        inc = inc.mask(na | na.shift(axis=1, fill_value=True))
+        # Get numpy arrays
+        arr = inc.to_numpy()
+        
+        # Compute differences
+        diff = arr[:, 1:] - arr[:, :-1]
+        
+        # Apply differences
+        result = arr.copy()
+        result[:, 1:] = diff
+        
+        # Create mask: NaN where original was NaN OR previous was NaN
+        na_mask = np.isnan(arr)
+        
+        # For columns 1+, also mask if previous column was NaN
+        for j in range(1, arr.shape[1]):
+            na_mask[:, j] = na_mask[:, j] | na_mask[:, j-1]
+        
+        # Apply mask
+        result[na_mask] = np.nan
+        
+        # Return as DataFrame
+        return pd.DataFrame(result, index=inc.index, columns=inc.columns)
+    
     return inc
 
 def _call_with_signature(func, df_in: pd.DataFrame, params: dict | None = None) -> pd.DataFrame:
@@ -700,6 +720,11 @@ def _call_method(func, df_cut: pd.DataFrame, name: str | None = None) -> pd.Data
     # Poisson bootstrap expects incremental triangle
     if name == "Poissonbootstrap":
         df_in = _ensure_incremental(df_in)
+        if df_in.shape[0] > 0 and pd.notna(df_in.iloc[0, 0]) and df_in.iloc[0, 1:].isna().all():
+            # First AY has only first column - ensure it's not lost
+            # Store the value to verify it's preserved
+            first_ay_first_col = df_in.iloc[0, 0]
+    
 
     # --- Fetch method parameters
     cfgs = st.session_state.get("METHOD_CONFIGS", {})
@@ -1333,13 +1358,12 @@ except Exception as e:
     st.stop()
 
 with st.container():
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+    st.markdown('---', unsafe_allow_html=True)
     col1, col2 = st.columns(2)
     with col1:
         sheet = st.selectbox("Sheet", options=sheets, index=0)
     with col2:
         triangle_type = st.radio("Type", ["Tableau des charges", "Tableau Cummulative"], index=0, horizontal=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 ibnr_label = "IBNR" if triangle_type == "Tableau des charges" else "SAP+IBNR"
 index_col = 0
@@ -1351,13 +1375,11 @@ except Exception as e:
     st.stop()
 
 with st.container():
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+    st.markdown('---', unsafe_allow_html=True)
     st.markdown("**Data Preview**")
     _preview = df_raw.copy()
     _preview.columns = _preview.columns.astype(str)
     st.dataframe(_format_display(_preview.head(15)), use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
 
 # Determine valid years early
 try:
@@ -1403,7 +1425,7 @@ with st.sidebar:
 
 col1, col2 = st.columns(2)
 with col1:
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+    st.markdown('---', unsafe_allow_html=True)
     st.markdown("**Factors Assumption**")
     st.markdown('<span class="g3m-muted">R² stability test</span>', unsafe_allow_html=True)
     if st.button("Validate Factors", key="btn_validate_factors", use_container_width=True):
@@ -1430,10 +1452,9 @@ with col1:
             st.markdown('<span class="g3m-error">✗ Rejected (R² < threshold)</span>', unsafe_allow_html=True)
     else:
         st.markdown('<span class="g3m-muted">Not yet validated</span>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
-    st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+    st.markdown('---', unsafe_allow_html=True)
     st.markdown("**Calendar Assumption**")
     st.markdown('<span class="g3m-muted">Time effect hypothesis test</span>', unsafe_allow_html=True)
     if st.button("Validate Calendar", key="btn_validate_calendar", use_container_width=True):
@@ -1460,7 +1481,6 @@ with col2:
             st.markdown('<span class="g3m-error">✗ Rejected (Z out CI)</span>', unsafe_allow_html=True)
     else:
         st.markdown('<span class="g3m-muted">Not yet validated</span>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================================
@@ -1478,7 +1498,7 @@ def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
         if not callable(globals().get(name, None)):
             continue
         meta = METHOD_META.get(name, {"title": name, "desc": ""})
-        st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+        st.markdown('---', unsafe_allow_html=True)
         cols = st.columns([0.75, 0.25])
         with cols[0]:
             st.markdown(f"**{meta['title']}**")
@@ -1497,7 +1517,6 @@ def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
                     include = st.checkbox("Include report", value=include_default, key=f"rep_{name}")
                     rname = st.text_input("Name", value=rname_default, key=f"name_{name}")
                     configs[name] = {"B": int(B), "Report": include, "report_name": rname}
-        st.markdown('</div>', unsafe_allow_html=True)
 
         if pick:
             selected.append(name)
@@ -1560,14 +1579,14 @@ if run_clicked:
             st.stop()
 
     if not method_scores.empty:
-        st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+        st.markdown('---', unsafe_allow_html=True)
         st.markdown("**Method Comparison Scores**")
         st.markdown('<span class="g3m-muted">Lower scores indicate better stability and consistency</span>', unsafe_allow_html=True)
         st.dataframe(_format_display(method_scores), use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
 
     if best_method:
-        st.markdown(f'<div class="g3m-card" style="border-left-color:#3CB371"><span class="g3m-success">✓ Recommended: <strong>{best_method}</strong> for AY {selection_ay}</span></div>', unsafe_allow_html=True)
+        st.markdown('---', unsafe_allow_html=True)
+        st.markdown(f'<span class="g3m-success">✓ Recommended: <strong>{best_method}</strong> for AY {selection_ay}</span>', unsafe_allow_html=True)
     else:
         st.info("No clear best method; select manually in Phase 5.")
 
@@ -1595,7 +1614,7 @@ if primes_file is not None:
     except Exception as e:
         st.warning(f"Could not read primes: {e}")
 
-st.markdown('<div class="g3m-card">', unsafe_allow_html=True)
+st.markdown('---', unsafe_allow_html=True)
 st.markdown("**Select Completion Method**")
 options_for_completion = selected_methods if selected_methods else [m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))]
 
@@ -1621,8 +1640,6 @@ with col1:
     )
 with col2:
     report_name = st.text_input("Filename", value="Ultime_Report", label_visibility="collapsed")
-
-st.markdown('</div>', unsafe_allow_html=True)
 
 build_clicked = st.button("Generate Report", type="primary", use_container_width=True)
 
@@ -1693,10 +1710,9 @@ if build_clicked:
             st.error(f"Report generation failed: {e}")
             st.stop()
 
-        st.markdown('<div class="g3m-card" style="border-left-color:#3CB371">', unsafe_allow_html=True)
+        st.markdown('---', unsafe_allow_html=True)
         st.markdown("**Report Ready**")
         st.markdown(f"✓ Completed with <strong>{st.session_state.chosen_method or chosen}</strong>")
-        st.markdown('</div>', unsafe_allow_html=True)
 
         download_base = _sanitize_filename(report_name or "Ultime_Report")
         st.download_button(

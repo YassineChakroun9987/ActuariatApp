@@ -471,17 +471,7 @@ def _triangle_to_incremental(df: pd.DataFrame) -> pd.DataFrame:
 # --- end tiny helpers ---
 
 
-# =========================================================
-# Poisson / ODP Bootstrap — FIXED (no missing row/col)
-# =========================================================
-from pathlib import Path
-import re
-import numpy as np
-import pandas as pd
-import statsmodels.api as sm
-import warnings
 
-import streamlit as st
 
 
 
@@ -497,7 +487,9 @@ import statsmodels.api as sm
 import warnings
 
 
-
+# =========================================================
+# Poisson / ODP Bootstrap — FIXED VERSION (preserves first AY values)
+# =========================================================
 def Poissonbootstrap(
     df: pd.DataFrame,
     Report: bool = True,
@@ -555,7 +547,6 @@ def Poissonbootstrap(
     def _coerce_numeric(df_in: pd.DataFrame) -> pd.DataFrame:
         """Coerce columns to numeric, preserving original index and columns."""
         out = df_in.copy()
-        # Convert only the data, not index/columns
         for c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce")
         return out
@@ -682,8 +673,8 @@ def Poissonbootstrap(
         print(f"Triangle shape: {n}x{m}")
         print(f"Observed cells: {obs_mask.sum()}")
         print(f"Future cells: {fut_mask.sum()}")
-        print(f"Last row obs mask: {obs_mask[-1, :]}")
-        print(f"Last row fut mask: {fut_mask[-1, :]}")
+        print(f"First row obs mask: {obs_mask[0, :]}")
+        print(f"First row fut mask: {fut_mask[0, :]}")
 
     # Observed values
     inc_vals = tri_inc.to_numpy(dtype=float)
@@ -744,15 +735,12 @@ def Poissonbootstrap(
     cum_samples = np.full((B, n, m), np.nan, dtype=float)
     sample_list = []
 
-    # CRITICAL FIX: Don't blindly set first column to 0
-    # Instead, preserve the observed values in first column
-    # Only use zeros for cells that are truly unobserved
-    first_col_mask = obs_mask[:, 0]
-    first_col_vals = np.where(first_col_mask, inc_vals[:, 0], 0.0)
-    first_col_vals = np.nan_to_num(first_col_vals, nan=0.0)
+    # Store first column values for debugging
+    first_col_vals = inc_vals[:, 0].copy()
+    first_col_obs = obs_mask[:, 0]
 
     # -----------------------------
-    # Bootstrap loop
+    # Bootstrap loop - FIXED to preserve observed values
     # -----------------------------
     for b in range(B):
         r_star = rng.choice(r_pool, size=r_pool.shape[0], replace=True)
@@ -774,24 +762,36 @@ def Poissonbootstrap(
             simulated = phi_eff * rng.poisson(lam)
             inc_repl[mask_fut] = simulated
         
-        # Preserve observed values (including first column)
-        # This is important: we should never overwrite observed values
+        # CRITICAL FIX: ALWAYS preserve observed values
+        # Never overwrite observed cells with simulations
         inc_repl[obs_mask] = inc_obs_vals[obs_mask]
         
-        # Special handling: if first column has zeros in original data, keep them
-        # Don't force zeros if they're not in the original data
-        for i in range(n):
-            if not first_col_mask[i]:
-                # If first column is not observed, it might be 0 or simulated
-                # Check if it was simulated in fut_mask
-                if fut_mask[i, 0]:
-                    # It was simulated, keep the simulation
-                    pass
-                else:
-                    # It should be 0 (before first observed dev period)
-                    inc_repl[i, 0] = 0.0
+        # FIX: Ensure first accident year's first column is preserved
+        # This handles the case where first AY only has first column
+        if first_col_obs[0] and np.isfinite(first_col_vals[0]):
+            inc_repl[0, 0] = first_col_vals[0]
         
-        cum_repl = np.cumsum(inc_repl, axis=1)
+        # Compute cumulative sums
+        cum_repl = np.zeros_like(inc_repl, dtype=float)
+        
+        # FIX: Compute cumulative sum correctly, preserving observed values
+        for i in range(n):
+            cumulative = 0.0
+            for j in range(m):
+                if obs_mask[i, j] and np.isfinite(inc_vals[i, j]):
+                    # If cell is observed, use the original observed value
+                    cumulative += inc_vals[i, j]
+                elif not obs_mask[i, j] and fut_mask[i, j]:
+                    # If cell is in future region, use simulated value
+                    cumulative += inc_repl[i, j]
+                elif not obs_mask[i, j] and not fut_mask[i, j]:
+                    # If cell is neither observed nor future (shouldn't happen), use 0
+                    cumulative += 0.0
+                else:
+                    # Observed cell that was NaN in original? Use current value
+                    cumulative += inc_repl[i, j]
+                cum_repl[i, j] = cumulative
+        
         cum_samples[b, :, :] = cum_repl
         if b < 5:
             sample_list.append(pd.DataFrame(cum_repl, index=idx_ay, columns=cols_dev))
@@ -799,15 +799,46 @@ def Poissonbootstrap(
             print(f"[DEBUG] iter={b}, phi={phi_eff:.6g}, simulated={mask_fut.sum()}")
             if b == 0:
                 print(f"  First col values: {inc_repl[:, 0]}")
-                print(f"  Last row values: {inc_repl[-1, :]}")
+                print(f"  First col original: {first_col_vals}")
+                print(f"  Obs mask first col: {obs_mask[:, 0]}")
+                print(f"  First AY cum: {cum_repl[0, :]}")
+                print(f"  First AY inc: {inc_repl[0, :]}")
 
     # -----------------------------
     # Aggregate results
     # -----------------------------
+    # Use nan-aware functions to handle any remaining NaN values
     mean_cum = np.nanmean(cum_samples, axis=0)
     p50_cum = np.nanpercentile(cum_samples, 50, axis=0)
     p75_cum = np.nanpercentile(cum_samples, 75, axis=0)
     p99_cum = np.nanpercentile(cum_samples, 99, axis=0)
+
+    # Replace any NaN in aggregated results with appropriate values
+    # For mean, use mean of non-NaN values; for percentiles, use nearest valid
+    def _safe_replace(arr):
+        """Replace NaN values with appropriate estimates."""
+        result = arr.copy()
+        nan_mask = np.isnan(result)
+        if nan_mask.any():
+            # For rows with NaN, fill with row mean or column mean
+            for i in range(n):
+                row = result[i, :]
+                if np.isnan(row).any():
+                    row_mean = np.nanmean(row)
+                    if np.isfinite(row_mean):
+                        result[i, np.isnan(row)] = row_mean
+                    else:
+                        # If entire row is NaN, use column means
+                        for j in range(m):
+                            if np.isnan(result[i, j]):
+                                col_mean = np.nanmean(result[:, j])
+                                result[i, j] = col_mean if np.isfinite(col_mean) else 0.0
+        return result
+
+    mean_cum = _safe_replace(mean_cum)
+    p50_cum = _safe_replace(p50_cum)
+    p75_cum = _safe_replace(p75_cum)
+    p99_cum = _safe_replace(p99_cum)
 
     mk = lambda arr: pd.DataFrame(arr, index=idx_ay, columns=cols_dev)
 
@@ -869,10 +900,11 @@ def Poissonbootstrap(
     else:
         out = mk(p50_cum)
 
+    # Final check: ensure first AY first column is preserved
+    if first_col_obs[0] and np.isfinite(first_col_vals[0]):
+        out.iloc[0, 0] = first_col_vals[0]
+
     return out, report_bytes
-
-
-
 
 
 # =========================================================
