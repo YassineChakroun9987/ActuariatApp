@@ -7,6 +7,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+
+
 # Add this after the existing imports section
 # =========================
 # DASHBOARD VISUALIZATION FUNCTIONS (Simplified)
@@ -942,7 +944,7 @@ def _call_method(func, df_cut: pd.DataFrame, name: str | None = None) -> pd.Data
             st.session_state.BOOTSTRAP_REPORTS[name] = report_bytes
             
             # DEBUG: Log that we stored the report
-            print(f"Stored bootstrap report for {name}, size: {len(report_bytes)} bytes")
+            print(f"Stored bootstrap report for {name}, size: {len(report_bytes) if report_bytes is not None else 0} bytes")
     else:
         out_df = out
 
@@ -1518,6 +1520,76 @@ def _build_excel_report(
     buffer.seek(0)
     return buffer.getvalue()
 
+#BF METHOD
+def bornhuetter_ferguson_table(
+    triangle: pd.DataFrame,
+    primes_df: pd.DataFrame,
+    loss_ratio_pct: float
+) -> pd.DataFrame:
+
+    tri = _coerce_age_columns(_coerce_index_to_int(triangle))
+
+    # Latest observed cumulative
+    latest_obs = tri.ffill(axis=1).iloc[:, -1]
+
+    # Development factors
+    cols = tri.columns
+    link_ratios = []
+    for i in range(len(cols) - 1):
+        r = (tri[cols[i + 1]] / tri[cols[i]]).replace([np.inf, -np.inf], np.nan)
+        link_ratios.append(r.mean(skipna=True))
+
+    link_ratios = np.array(link_ratios)
+    cdfs = np.flip(np.cumprod(np.flip(link_ratios)))
+    cdfs = np.append(cdfs, 1.0)
+    cdf_map = dict(zip(cols, cdfs))
+
+    # ✅ FIX: last observed development age (not first)
+    latest_dev_col = tri.apply(lambda r: r.last_valid_index(), axis=1)
+    cdf_to_ult = latest_dev_col.map(cdf_map)
+
+    premiums = primes_df["Premium"].reindex(tri.index)
+
+    lr = loss_ratio_pct / 100.0
+    expected_ultimate = premiums * lr
+
+    unreported_pct = 1.0 - (1.0 / cdf_to_ult)
+    bf_ibnr = expected_ultimate * unreported_pct
+    bf_ultimate = latest_obs + bf_ibnr
+
+    return pd.DataFrame({
+        "Latest Observed": latest_obs,
+        "Premium": premiums,
+        "Expected Ultimate": expected_ultimate,
+        "BF IBNR": bf_ibnr,
+        "BF Ultimate": bf_ultimate
+    })
+
+def build_bf_excel_report(
+    triangle: pd.DataFrame,
+    bf_table: pd.DataFrame
+) -> bytes:
+    buffer = io.BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as xw:
+        _ceil_numeric(triangle).to_excel(
+            xw, sheet_name="Original_Triangle", startrow=1
+        )
+        _ceil_numeric(bf_table).to_excel(
+            xw, sheet_name="BF_Results", startrow=1
+        )
+
+        _apply_global_excel_styles(
+            xw.book,
+            {
+                "Original_Triangle": "Original Triangle (Input)",
+                "BF_Results": "Bornhuetter–Ferguson – Ultimes & IBNR"
+            }
+        )
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
 # =========================
 # APP UI (Ultime only) — 5-PHASE WORKFLOW
 # =========================
@@ -1550,6 +1622,7 @@ with st.container():
         sheet = st.selectbox("Sheet", options=sheets, index=0)
     with col2:
         triangle_type = st.radio("Type", ["Tableau des charges", "Tableau Cummulative"], index=0, horizontal=True)
+
 
 ibnr_label = "IBNR" if triangle_type == "Tableau des charges" else "SAP+IBNR"
 index_col = 0
@@ -1672,9 +1745,134 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ============================================================================
 # PHASE 3: METHOD STRATEGY
 # ============================================================================
+# ============================================================================
+# PHASE 3: METHOD STRATEGY
+# ============================================================================
 st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
 st.markdown("### Phase 3: Method Strategy")
 st.markdown('<span class="g3m-muted">Select completion methods for analysis</span>', unsafe_allow_html=True)
+st.markdown("---")
+
+st.markdown("### Bornhuetter–Ferguson Override")
+
+use_bf_override = st.checkbox(
+    "The dataset isn't accurate – use Bornhuetter–Ferguson only",
+    key="USE_BF_OVERRIDE",
+    help="Ignores development-based methods and applies BF using premiums and an expert loss ratio."
+)
+
+# ============================================================================
+# BF OVERRIDE MODE - COMPLETE WORKFLOW
+# ============================================================================
+if st.session_state.get("USE_BF_OVERRIDE", False):
+    st.info(
+        "Bornhuetter–Ferguson mode selected.\n\n"
+        "All development-based methods and stability analysis are disabled."
+    )
+    
+    st.markdown('---', unsafe_allow_html=True)
+    st.markdown("#### Upload Primes File")
+    
+    primes_file = st.file_uploader(
+        "Upload Primes file (.xlsx)",
+        type=["xlsx"],
+        accept_multiple_files=False,
+        key="bf_primes_upload"
+    )
+    
+    if primes_file:
+        primes_bytes = primes_file.read()
+        primes_df = _read_and_validate_primes(primes_bytes)
+        
+        if primes_df is None or primes_df.empty:
+            st.error("Invalid primes file. Please upload a valid Excel file with Year and Premium columns.")
+            st.stop()
+        
+        st.session_state.PRIMES_DATA = primes_df
+        st.success(f"✓ Primes loaded: {len(primes_df)} years of data")
+        
+        # Show preview of primes data
+        st.markdown("**Primes Data Preview:**")
+        st.dataframe(primes_df.head(), use_container_width=True)
+    
+    st.markdown('---', unsafe_allow_html=True)
+    st.markdown("#### Set Loss Ratio")
+    
+    bf_lr = st.number_input(
+        "Expert Loss Ratio (%)",
+        min_value=0.0,
+        max_value=300.0,
+        value=float(st.session_state.get("BF_LR", 65.0)),
+        step=1.0,
+        key="BF_LR",
+        help="Enter the expected loss ratio percentage (e.g., 65 for 65%)"
+    )
+    
+    st.markdown('---', unsafe_allow_html=True)
+    
+    if st.button("Estimate (Bornhuetter–Ferguson)", type="primary", use_container_width=True):
+        if "PRIMES_DATA" not in st.session_state:
+            st.error("Please upload a primes file first.")
+            st.stop()
+        
+        with st.spinner("Running Bornhuetter–Ferguson calculation..."):
+            try:
+                # Run BF calculation
+                bf_table = bornhuetter_ferguson_table(
+                    df_raw,
+                    st.session_state.PRIMES_DATA,
+                    bf_lr
+                )
+                
+                # Generate Excel report
+                bf_excel = build_bf_excel_report(df_raw, bf_table)
+                
+                # Store in session for download
+                st.session_state.BF_EXCEL_REPORT = bf_excel
+                st.session_state.BF_RESULTS = bf_table
+                
+                st.success("✓ Bornhuetter-Ferguson calculation complete!")
+                
+                # Show results
+                st.markdown("**BF Results Preview:**")
+                st.dataframe(_format_display(bf_table), use_container_width=True)
+                
+                # Calculate totals
+                total_ibnr = bf_table["BF IBNR"].sum()
+                total_ultimate = bf_table["BF Ultimate"].sum()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total IBNR", f"{total_ibnr:,.0f}")
+                with col2:
+                    st.metric("Total Ultimate", f"{total_ultimate:,.0f}")
+                
+            except Exception as e:
+                st.error(f"Bornhuetter-Ferguson calculation failed: {e}")
+                st.stop()
+    
+    # Download button if report exists
+    if "BF_EXCEL_REPORT" in st.session_state:
+        st.markdown('---', unsafe_allow_html=True)
+        st.markdown("#### Download Report")
+        
+        report_name_default = f"BF_Report_LR{bf_lr:.0f}.xlsx"
+        report_name = st.text_input("Report filename", value=report_name_default)
+        
+        st.download_button(
+            label="Download BF Excel Report",
+            data=st.session_state.BF_EXCEL_REPORT,
+            file_name=report_name,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True
+        )
+    
+    # Stop here - don't show normal workflow
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+
 
 def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
     configs = st.session_state.get("METHOD_CONFIGS", {})
@@ -1710,12 +1908,26 @@ def render_methods_ui(default_selected: list[str]) -> tuple[list[str], dict]:
     st.session_state.METHOD_CONFIGS = configs
     return selected, configs
 
-selected_methods, _method_cfgs = render_methods_ui([m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))])
+    
+# ONLY if BF is OFF
+selected_methods, _method_cfgs = render_methods_ui(
+    [m for m in ALL_METHOD_NAMES if callable(globals().get(m, None))]
+)
+
+
+
+
+
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================================
 # PHASE 4: STABILITY & SELECTION
 # ============================================================================
+if st.session_state.get("USE_BF_OVERRIDE", False):
+    st.info("Stability analysis is skipped in Bornhuetter–Ferguson mode.")
+    
+    st.stop()
 st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
 st.markdown("### Phase 4: Ultime Stability & Method Selection")
 st.markdown('<span class="g3m-muted">Analyze consistency across cut years</span>', unsafe_allow_html=True)
@@ -1783,6 +1995,71 @@ st.markdown('</div>', unsafe_allow_html=True)
 # ============================================================================
 st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
 st.markdown("### Phase 5: Report Generation")
+
+# ---------------------------------------------------------------------------
+# BF MODE (exclusive)
+# ---------------------------------------------------------------------------
+if st.session_state.get("USE_BF_OVERRIDE", False):
+
+    st.markdown('<span class="g3m-muted">Bornhuetter–Ferguson estimation</span>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    primes_file = st.file_uploader(
+        "Upload Primes file (.xlsx)",
+        type=["xlsx"],
+        accept_multiple_files=False,
+        key="bf_primes_upload"
+    )
+
+    if primes_file:
+        primes_bytes = primes_file.read()
+        primes_df = _read_and_validate_primes(primes_bytes)
+
+        if primes_df is None or primes_df.empty:
+            st.error("Invalid primes file.")
+            st.stop()
+
+        st.session_state.PRIMES_DATA = primes_df
+        st.success("✓ Primes loaded")
+
+    bf_lr = st.number_input(
+        "Expert Loss Ratio (%)",
+        min_value=0.0,
+        max_value=300.0,
+        value=float(st.session_state.get("BF_LR", 65.0)),
+        step=1.0,
+        key="BF_LR"
+    )
+
+    if st.button("Estimate (Bornhuetter–Ferguson)", type="primary", use_container_width=True):
+
+        if "PRIMES_DATA" not in st.session_state:
+            st.error("Please upload a primes file.")
+            st.stop()
+
+        with st.spinner("Running Bornhuetter–Ferguson…"):
+            bf_table = bornhuetter_ferguson_table(
+                df_raw,
+                st.session_state.PRIMES_DATA,
+                bf_lr
+            )
+            bf_excel = build_bf_excel_report(df_raw, bf_table)
+
+        st.success("✓ BF report ready")
+
+        st.download_button(
+            label="Download BF Excel Report",
+            data=bf_excel,
+            file_name="BF_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True
+        )
+
+    
+    st.stop()
+
+
 st.markdown('<span class="g3m-muted">Create and download finalized Excel report</span>', unsafe_allow_html=True)
 
 # Optional primes file for S/P ratio
@@ -1842,6 +2119,7 @@ if build_clicked:
             func = globals().get(st.session_state.chosen_method or chosen, None)
             if not callable(func):
                 raise ValueError(f"Selected method is not callable.")
+            
             base = _coerce_age_columns(_coerce_index_to_int(df_raw))
             base_for_method = base
 
@@ -1854,9 +2132,11 @@ if build_clicked:
 
             if isinstance(out, tuple):
                 pred_full_raw, report_bytes = out
-                if report_bytes is not None:
+                # FIX: Only store if it's a bootstrap method AND report_bytes is not None
+                method_name = st.session_state.chosen_method or chosen
+                if report_bytes is not None and method_name in ["Poissonbootstrap", "ChainLadderBootstrap"]:
                     st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
-                    st.session_state.BOOTSTRAP_REPORTS[st.session_state.chosen_method or chosen] = report_bytes
+                    st.session_state.BOOTSTRAP_REPORTS[method_name] = report_bytes
             else:
                 pred_full_raw = out
 
@@ -1918,33 +2198,53 @@ if build_clicked:
         )
 
         bootstrap_reports = st.session_state.get("BOOTSTRAP_REPORTS", {})
+        method_configs = st.session_state.get("METHOD_CONFIGS", {})
         if bootstrap_reports:
             st.markdown("---")
             st.markdown("**Bootstrap Reports**")
-            if "Poissonbootstrap" in bootstrap_reports and bootstrap_reports["Poissonbootstrap"] is not None:
+
+            def _include_report_enabled(method_name: str) -> bool:
+                cfg = method_configs.get(method_name, {})
+                return bool(cfg.get("Report", False))
+
+            # Show Poisson bootstrap report if it exists and was requested in settings
+            if (
+                "Poissonbootstrap" in bootstrap_reports
+                and bootstrap_reports["Poissonbootstrap"] is not None
+                and _include_report_enabled("Poissonbootstrap")
+            ):
                 st.download_button(
                     "Download Poisson Bootstrap Report",
                     data=bootstrap_reports["Poissonbootstrap"],
                     file_name="Poisson_Bootstrap_Report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="poisson_dl",
+                    key="poisson_dl_" + str(hash(str(bootstrap_reports["Poissonbootstrap"])[:50])),
                     use_container_width=True
                 )
-            if "ChainLadderBootstrap" in bootstrap_reports and bootstrap_reports["ChainLadderBootstrap"] is not None:
+
+            # Show Chain Ladder bootstrap report if it exists and was requested in settings
+            if (
+                "ChainLadderBootstrap" in bootstrap_reports
+                and bootstrap_reports["ChainLadderBootstrap"] is not None
+                and _include_report_enabled("ChainLadderBootstrap")
+            ):
                 st.download_button(
                     "Download Chain Ladder Bootstrap Report",
                     data=bootstrap_reports["ChainLadderBootstrap"],
                     file_name="ChainLadder_Bootstrap_Report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="cl_dl",
+                    key="cl_dl_" + str(hash(str(bootstrap_reports["ChainLadderBootstrap"])[:50])),
                     use_container_width=True
                 )
-
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================================================
 # PHASE 6: DASHBOARD VISUALIZATION (Simplified)
 # ============================================================================
+if st.session_state.get("USE_BF_OVERRIDE", False):
+    st.info("Dashboard is not available in Bornhuetter–Ferguson mode.")
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
 st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
 st.markdown("### Phase 6: Dashboard Visualization")
 st.markdown('<span class="g3m-muted">Interactive insights and analytics</span>', unsafe_allow_html=True)
@@ -2294,4 +2594,3 @@ else:
     - IBNR/SAP+IBNR distribution
     """)
 
-st.markdown('</div>', unsafe_allow_html=True)
