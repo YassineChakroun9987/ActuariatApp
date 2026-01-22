@@ -2,7 +2,183 @@ from __future__ import annotations
 # ---- Silence "missing ScriptRunContext" warnings from Streamlit worker threads
 import logging, warnings
 
+# Add these imports at the top with other imports
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
+# Add this after the existing imports section
+# =========================
+# DASHBOARD VISUALIZATION FUNCTIONS (Simplified)
+# =========================
+def create_sp_ratio_chart(sp_data: pd.DataFrame, threshold: float = 1.0) -> go.Figure:
+    """Create S/P ratio histogram and bar chart."""
+    if sp_data.empty or "S/P" not in sp_data.columns:
+        return go.Figure()
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=("S/P Ratio by Accident Year", "S/P Ratio Distribution"),
+        vertical_spacing=0.15,
+        row_heights=[0.6, 0.4]
+    )
+    
+    # Bar chart for S/P by year
+    years = sp_data.index.astype(str)
+    sp_values = sp_data["S/P"].values
+    
+    # Color based on threshold
+    colors = ['#FF6B6B' if x > threshold else '#4ECDC4' for x in sp_values]
+    
+    fig.add_trace(
+        go.Bar(
+            x=years,
+            y=sp_values,
+            name="S/P Ratio",
+            marker_color=colors,
+            text=[f"{x:.3f}" for x in sp_values],
+            textposition='outside',
+            hovertemplate="Year: %{x}<br>S/P Ratio: %{y:.3f}<extra></extra>"
+        ),
+        row=1, col=1
+    )
+    
+    # Add threshold line
+    fig.add_hline(
+        y=threshold,
+        line_dash="dash",
+        line_color="orange",
+        line_width=2,
+        annotation_text=f"Threshold = {threshold}",
+        annotation_position="top right",
+        row=1, col=1
+    )
+    
+    # Histogram of S/P distribution
+    fig.add_trace(
+        go.Histogram(
+            x=sp_values,
+            name="Distribution",
+            nbinsx=15,
+            marker_color='#6A89CC',
+            opacity=0.7,
+            hovertemplate="Count: %{y}<br>Range: %{x}<extra></extra>"
+        ),
+        row=2, col=1
+    )
+    
+    fig.update_layout(
+        height=600,
+        showlegend=False,
+        plot_bgcolor='rgba(240, 242, 246, 0.8)',
+        paper_bgcolor='rgba(240, 242, 246, 0.3)',
+        xaxis_title="Accident Year",
+        yaxis_title="S/P Ratio",
+        xaxis2_title="S/P Ratio",
+        yaxis2_title="Frequency"
+    )
+    
+    return fig
+
+def create_cumulative_development_chart(completed_triangle: pd.DataFrame, 
+                                       selected_years: list) -> go.Figure:
+    """Create cumulative development chart for selected accident years."""
+    if completed_triangle.empty:
+        return go.Figure()
+    
+    fig = go.Figure()
+    
+    # Get development ages
+    ages = completed_triangle.columns.astype(int)
+    
+    for year in selected_years:
+        if year in completed_triangle.index:
+            development = completed_triangle.loc[year].values
+            
+            fig.add_trace(go.Scatter(
+                x=ages,
+                y=development,
+                mode='lines+markers',
+                name=f'AY {year}',
+                line=dict(width=3),
+                marker=dict(size=6),
+                hovertemplate=f"AY {year}<br>Age: %{{x}}<br>Value: %{{y:,.0f}}<extra></extra>"
+            ))
+    
+    fig.update_layout(
+        title="Cumulative Development Pattern by Accident Year",
+        xaxis_title="Development Age",
+        yaxis_title="Cumulative Value",
+        height=500,
+        plot_bgcolor='rgba(240, 242, 246, 0.8)',
+        paper_bgcolor='rgba(240, 242, 246, 0.3)',
+        hovermode='x unified'
+    )
+    
+    return fig
+
+def create_ibnr_distribution_chart(completed_triangle: pd.DataFrame, 
+                                  original_triangle: pd.DataFrame,
+                                  triangle_type: str) -> go.Figure:
+    """Create pie chart showing IBNR/SAP+IBNR distribution."""
+    if completed_triangle.empty or original_triangle.empty:
+        return go.Figure()
+    
+    # Calculate IBNR/SAP+IBNR
+    ultimates = completed_triangle.iloc[:, -1]
+    latest_observed = original_triangle.ffill(axis=1).iloc[:, -1]
+    ibnr = (ultimates - latest_observed).rename("IBNR")
+    
+    # Remove negative values (shouldn't happen but just in case)
+    ibnr = ibnr[ibnr > 0]
+    
+    if ibnr.empty:
+        return go.Figure()
+    
+    # Create labels with year and percentage
+    total_ibnr = ibnr.sum()
+    labels = [f"AY {year}" for year in ibnr.index]
+    values = ibnr.values
+    
+    # Calculate percentages
+    percentages = (values / total_ibnr * 100).round(1)
+    
+    # Create hover text
+    hover_text = [f"AY {year}<br>Value: {val:,.0f}<br>{pct}% of total" 
+                  for year, val, pct in zip(ibnr.index, values, percentages)]
+    
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hoverinfo='text',
+        text=hover_text,
+        textinfo='percent+label',
+        hole=.4,
+        marker=dict(colors=px.colors.qualitative.Set3),
+        sort=False
+    )])
+    
+    ibnr_label = "IBNR" if triangle_type == "Tableau des charges" else "SAP+IBNR"
+    
+    fig.update_layout(
+        title=f"{ibnr_label} Distribution by Accident Year",
+        height=500,
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=1.1
+        ),
+        annotations=[dict(
+            text=f"Total {ibnr_label}<br>{total_ibnr:,.0f}",
+            x=0.5, y=0.5,
+            font_size=14,
+            showarrow=False
+        )]
+    )
+    
+    return fig
 
 # Cover the whole Streamlit logger tree (some versions use parent loggers)
 for name in (
@@ -724,7 +900,6 @@ def _call_method(func, df_cut: pd.DataFrame, name: str | None = None) -> pd.Data
             # First AY has only first column - ensure it's not lost
             # Store the value to verify it's preserved
             first_ay_first_col = df_in.iloc[0, 0]
-    
 
     # --- Fetch method parameters
     cfgs = st.session_state.get("METHOD_CONFIGS", {})
@@ -752,12 +927,22 @@ def _call_method(func, df_cut: pd.DataFrame, name: str | None = None) -> pd.Data
                 raise
 
     # --- Handle bootstrap tuple return
+    # FIX: Only update bootstrap reports if we get a NON-NONE report_bytes
     if isinstance(out, tuple):
         out_df, report_bytes = out
 
-        if report_bytes is not None:
-            st.session_state.setdefault("BOOTSTRAP_REPORTS", {})
+        # CRITICAL FIX: Only store the report if report_bytes is not None
+        # AND if this is actually a bootstrap method
+        if report_bytes is not None and name in ["Poissonbootstrap", "ChainLadderBootstrap"]:
+            # Initialize BOOTSTRAP_REPORTS if it doesn't exist
+            if "BOOTSTRAP_REPORTS" not in st.session_state:
+                st.session_state.BOOTSTRAP_REPORTS = {}
+            
+            # Store with method name as key
             st.session_state.BOOTSTRAP_REPORTS[name] = report_bytes
+            
+            # DEBUG: Log that we stored the report
+            print(f"Stored bootstrap report for {name}, size: {len(report_bytes)} bytes")
     else:
         out_df = out
 
@@ -767,6 +952,7 @@ def _call_method(func, df_cut: pd.DataFrame, name: str | None = None) -> pd.Data
 
     # --- Normalize index & columns
     return _coerce_age_columns(_coerce_index_to_int(out_df))
+
 
 def _run_methods_parallel(df_cut: pd.DataFrame, method_names: list[str]) -> dict[str, pd.DataFrame]:
     results: dict[str, pd.DataFrame] = {}
@@ -1646,6 +1832,13 @@ build_clicked = st.button("Generate Report", type="primary", use_container_width
 if build_clicked:
     with st.spinner("Generating Excel report..."):
         try:
+            # Clear existing bootstrap reports to avoid stale data
+            if "BOOTSTRAP_REPORTS" in st.session_state:
+                # Keep Poissonbootstrap if it exists, but clear ChainLadderBootstrap
+                # This ensures we get fresh report bytes
+                if "ChainLadderBootstrap" in st.session_state.BOOTSTRAP_REPORTS:
+                    st.session_state.BOOTSTRAP_REPORTS.pop("ChainLadderBootstrap", None)
+            
             func = globals().get(st.session_state.chosen_method or chosen, None)
             if not callable(func):
                 raise ValueError(f"Selected method is not callable.")
@@ -1746,5 +1939,359 @@ if build_clicked:
                     key="cl_dl",
                     use_container_width=True
                 )
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================================================
+# PHASE 6: DASHBOARD VISUALIZATION (Simplified)
+# ============================================================================
+st.markdown('<div class="g3m-phase">', unsafe_allow_html=True)
+st.markdown("### Phase 6: Dashboard Visualization")
+st.markdown('<span class="g3m-muted">Interactive insights and analytics</span>', unsafe_allow_html=True)
+
+# Initialize dashboard state
+if 'dashboard_ready' not in st.session_state:
+    st.session_state.dashboard_ready = False
+if 'selected_years_for_dashboard' not in st.session_state:
+    st.session_state.selected_years_for_dashboard = []
+
+# Only show dashboard if we have data
+if st.session_state.get('chosen_method') and run_clicked:
+    st.session_state.dashboard_ready = True
+    
+    # Get completed triangle data
+    try:
+        func = globals().get(st.session_state.chosen_method, None)
+        if callable(func):
+            base = _coerce_age_columns(_coerce_index_to_int(df_raw))
+            base_for_method = base
+            
+            with pd.option_context("mode.copy_on_write", False):
+                out = _call_with_signature(
+                    func,
+                    _make_writable_df(base_for_method),
+                    st.session_state.get("METHOD_CONFIGS", {}).get(st.session_state.chosen_method, {})
+                )
+            
+            if isinstance(out, tuple):
+                pred_full_raw, _ = out
+            else:
+                pred_full_raw = out
+            
+            pred_full = _coerce_age_columns(_coerce_index_to_int(pred_full_raw)).reindex(index=base.index, columns=base.columns)
+            completed = base.copy()
+            mask = completed.isna() & pred_full.notna()
+            completed[mask] = pred_full[mask]
+            completed = completed.ffill(axis=1)
+            
+            # Store in session for dashboard
+            st.session_state.completed_triangle = completed
+    except Exception as e:
+        st.warning(f"Could not prepare triangle for dashboard: {e}")
+        st.session_state.dashboard_ready = False
+
+if st.session_state.dashboard_ready:
+    # Dashboard controls
+    with st.container():
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Year selection for line charts
+            available_years = list(st.session_state.completed_triangle.index.astype(int))
+            if not st.session_state.selected_years_for_dashboard:
+                # Select first, middle, and last year by default
+                if len(available_years) >= 3:
+                    st.session_state.selected_years_for_dashboard = [
+                        available_years[0],
+                        available_years[len(available_years)//2],
+                        available_years[-1]
+                    ]
+                else:
+                    st.session_state.selected_years_for_dashboard = available_years
+            
+            selected_years = st.multiselect(
+                "Select Accident Years for Charts",
+                options=available_years,
+                default=st.session_state.selected_years_for_dashboard,
+                key="dashboard_year_select"
+            )
+            
+        with col2:
+            # S/P ratio threshold (only if primes data available)
+            if st.session_state.get("PRIMES_DATA") is not None:
+                sp_threshold = st.slider(
+                    "S/P Ratio Threshold",
+                    min_value=0.0,
+                    max_value=2.0,
+                    value=1.0,
+                    step=0.1,
+                    help="Ratios above this are colored red (bad), below green (good)"
+                )
+    
+    # ======================
+    # ROW 1: Key Metrics
+    # ======================
+    st.markdown("### Key Performance Indicators")
+    
+    # Calculate metrics
+    completed_triangle = st.session_state.completed_triangle
+    original_triangle = _coerce_age_columns(_coerce_index_to_int(df_raw))
+    
+    ultimates = completed_triangle.iloc[:, -1]
+    latest_observed = original_triangle.ffill(axis=1).iloc[:, -1]
+    
+    # Calculate IBNR/SAP+IBNR based on triangle type
+    ibnr_label = "IBNR" if triangle_type == "Tableau des charges" else "SAP+IBNR"
+    ibnr_series = (ultimates - latest_observed).rename(ibnr_label)
+    
+    # Remove negative values (shouldn't happen but just in case)
+    ibnr_positive = ibnr_series[ibnr_series > 0]
+    ibnr_total = ibnr_positive.sum()
+    
+    # S/P ratio metrics if primes available
+    sp_data = None
+    avg_sp = None
+    if st.session_state.get("PRIMES_DATA") is not None:
+        try:
+            primes_df = st.session_state.PRIMES_DATA
+            ultimates_idx = ultimates.index.astype(int)
+            primes_idx = primes_df.index.astype(int)
+            matching_years = ultimates_idx.intersection(primes_idx)
+            
+            sp_data = pd.DataFrame({
+                "Ultimate": ultimates.loc[matching_years],
+                "Premium": primes_df.loc[matching_years, "Premium"]
+            }).dropna()
+            
+            if not sp_data.empty:
+                sp_data["S/P"] = sp_data["Ultimate"] / sp_data["Premium"]
+                avg_sp = sp_data["S/P"].mean()
+                bad_years = (sp_data["S/P"] > sp_threshold).sum() if 'sp_threshold' in locals() else 0
+                total_years = len(sp_data)
+                bad_percentage = (bad_years / total_years * 100) if total_years > 0 else 0
+        except Exception as e:
+            st.warning(f"S/P calculation issue: {e}")
+    
+    # Create metric columns
+    metric_cols = st.columns(4)
+    
+    with metric_cols[0]:
+        st.metric(
+            label="Total Ultimate",
+            value=f"{ultimates.sum():,.0f}",
+            delta=f"{ibnr_total:,.0f} {ibnr_label}"
+        )
+    
+    with metric_cols[1]:
+        st.metric(
+            label="Completed Years",
+            value=str(len(completed_triangle)),
+            delta=f"{len(selected_years)} selected"
+        )
+    
+    with metric_cols[2]:
+        ibnr_percentage = (ibnr_total/ultimates.sum()*100) if ultimates.sum() > 0 else 0
+        st.metric(
+            label=f"Total {ibnr_label}",
+            value=f"{ibnr_total:,.0f}",
+            delta=f"{ibnr_percentage:.1f}% of total"
+        )
+    
+    with metric_cols[3]:
+        if avg_sp is not None:
+            delta_color = "inverse" if avg_sp > sp_threshold else "normal"
+            st.metric(
+                label="Avg S/P Ratio",
+                value=f"{avg_sp:.3f}",
+                delta_color=delta_color
+            )
+        else:
+            st.metric(label="Avg S/P Ratio", value="No primes data")
+    
+    # ======================
+    # ROW 2: S/P Analysis (if primes data available)
+    # ======================
+    if sp_data is not None and not sp_data.empty:
+        st.markdown("---")
+        st.markdown("#### S/P Ratio Analysis")
+        
+        # S/P ratio chart
+        fig_sp = create_sp_ratio_chart(sp_data, sp_threshold)
+        st.plotly_chart(fig_sp, use_container_width=True)
+        
+        # S/P statistics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown("**S/P Statistics**")
+            st.markdown(f"Mean: {sp_data['S/P'].mean():.3f}")
+            st.markdown(f"Median: {sp_data['S/P'].median():.3f}")
+        
+        with col2:
+            st.markdown("**Distribution**")
+            st.markdown(f"Min: {sp_data['S/P'].min():.3f}")
+            st.markdown(f"Max: {sp_data['S/P'].max():.3f}")
+        
+        with col3:
+            st.markdown("**Risk Assessment**")
+            if avg_sp > sp_threshold:
+                st.markdown('<span class="g3m-error">⚠️ High Risk Portfolio</span>', unsafe_allow_html=True)
+            elif avg_sp > sp_threshold * 0.8:
+                st.markdown('<span class="g3m-warning">⚠️ Medium Risk Portfolio</span>', unsafe_allow_html=True)
+            else:
+                st.markdown('<span class="g3m-success">✓ Low Risk Portfolio</span>', unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown("**Recommendation**")
+            if bad_percentage > 50:
+                st.markdown("Consider premium increase")
+            elif bad_percentage > 30:
+                st.markdown("Monitor closely")
+            else:
+                st.markdown("Portfolio is healthy")
+    
+    # ======================
+    # ROW 3: Cumulative Development
+    # ======================
+    st.markdown("---")
+    st.markdown("#### Cumulative Development Patterns")
+    
+    if selected_years and not completed_triangle.empty:
+        fig_cumulative = create_cumulative_development_chart(
+            completed_triangle,
+            selected_years
+        )
+        st.plotly_chart(fig_cumulative, use_container_width=True)
+        
+        # Development insights
+        st.markdown("**Development Insights:**")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Calculate development factors
+            dev_factors = []
+            for year in selected_years:
+                if year in completed_triangle.index:
+                    values = completed_triangle.loc[year].dropna().values
+                    if len(values) > 1:
+                        dev_factors.extend(values[1:] / values[:-1])
+            
+            if dev_factors:
+                avg_dev = np.mean(dev_factors)
+                st.markdown(f"Avg Development Factor: {avg_dev:.3f}")
+        
+        with col2:
+            # Check for tail behavior
+            tail_years = []
+            for year in selected_years:
+                if year in completed_triangle.index:
+                    values = completed_triangle.loc[year].dropna().values
+                    if len(values) > 2:
+                        tail_factor = values[-1] / values[-2]
+                        if tail_factor > 1.1:
+                            tail_years.append(year)
+            
+            if tail_years:
+                st.markdown(f"Strong tail in {len(tail_years)} years")
+            else:
+                st.markdown("Normal tail behavior")
+        
+        with col3:
+            # Check development consistency
+            consistency_scores = []
+            for year in selected_years:
+                if year in completed_triangle.index:
+                    values = completed_triangle.loc[year].dropna().values
+                    if len(values) > 3:
+                        cv = np.std(values) / np.mean(values) if np.mean(values) != 0 else 0
+                        consistency_scores.append(cv)
+            
+            if consistency_scores:
+                avg_cv = np.mean(consistency_scores)
+                if avg_cv < 0.1:
+                    st.markdown("✅ Stable development")
+                elif avg_cv < 0.2:
+                    st.markdown("⚠️ Moderate variation")
+                else:
+                    st.markdown("❌ High variation")
+    
+    # ======================
+    # ROW 4: IBNR Distribution
+    # ======================
+    st.markdown("---")
+    st.markdown(f"#### {ibnr_label} Distribution")
+    
+    fig_ibnr = create_ibnr_distribution_chart(
+        completed_triangle,
+        original_triangle,
+        triangle_type
+    )
+    st.plotly_chart(fig_ibnr, use_container_width=True)
+    
+    # IBNR insights
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(f"**{ibnr_label} Concentration:**")
+        # Check if IBNR is concentrated in specific years
+        if not ibnr_positive.empty:
+            top_3_years = ibnr_positive.nlargest(3)
+            total_top_3 = top_3_years.sum()
+            percentage_top_3 = (total_top_3 / ibnr_total * 100) if ibnr_total > 0 else 0
+            
+            if percentage_top_3 > 50:
+                st.markdown(f"⚠️ Top 3 years: {percentage_top_3:.1f}% of total")
+                st.markdown("High concentration risk")
+            else:
+                st.markdown(f"✓ Top 3 years: {percentage_top_3:.1f}% of total")
+                st.markdown("Well-distributed")
+            
+            # Show the top years
+            st.markdown("**Top years:**")
+            for year, value in top_3_years.items():
+                st.markdown(f"- AY {year}: {value:,.0f} ({value/ibnr_total*100:.1f}%)")
+    
+    with col2:
+        st.markdown("**Method Impact:**")
+        # Show how chosen method affects IBNR
+        if 'completed_triangle' in st.session_state and st.session_state.get('chosen_method'):
+            st.markdown(f"Method: {st.session_state.chosen_method}")
+            
+            # Simple categorization
+            method_lower = st.session_state.chosen_method.lower()
+            if 'bootstrap' in method_lower:
+                st.markdown("Method type: Stochastic")
+                st.markdown("Includes uncertainty")
+            elif 'chain' in method_lower:
+                st.markdown("Method type: Deterministic")
+                st.markdown("Classical approach")
+            else:
+                st.markdown("Method type: Specialized")
+                st.markdown("Tailored approach")
+            
+            # Show IBNR ratio
+            ibnr_ratio = (ibnr_total / ultimates.sum() * 100) if ultimates.sum() > 0 else 0
+            st.markdown(f"**{ibnr_label} Ratio:** {ibnr_ratio:.1f}%")
+            
+            if ibnr_ratio > 20:
+                st.markdown("⚠️ High reserve needs")
+            elif ibnr_ratio > 10:
+                st.markdown("⚠️ Moderate reserve needs")
+            else:
+                st.markdown("✓ Low reserve needs")
+
+else:
+    st.info("Complete Phase 5 first to generate the dashboard. Need to run Ultime analysis and select a completion method.")
+    st.markdown("""
+    **Requirements for Dashboard:**
+    1. Run Ultime analysis in Phase 4
+    2. Select a completion method in Phase 5
+    
+    **Dashboard will include:**
+    - Key performance indicators
+    - S/P ratio analysis (if primes uploaded)
+    - Cumulative development patterns
+    - IBNR/SAP+IBNR distribution
+    """)
 
 st.markdown('</div>', unsafe_allow_html=True)
