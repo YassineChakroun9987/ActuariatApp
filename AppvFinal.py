@@ -2111,10 +2111,8 @@ if build_clicked:
         try:
             # Clear existing bootstrap reports to avoid stale data
             if "BOOTSTRAP_REPORTS" in st.session_state:
-                # Keep Poissonbootstrap if it exists, but clear ChainLadderBootstrap
-                # This ensures we get fresh report bytes
-                if "ChainLadderBootstrap" in st.session_state.BOOTSTRAP_REPORTS:
-                    st.session_state.BOOTSTRAP_REPORTS.pop("ChainLadderBootstrap", None)
+                st.session_state.BOOTSTRAP_REPORTS.pop("Poissonbootstrap", None)
+                st.session_state.BOOTSTRAP_REPORTS.pop("ChainLadderBootstrap", None)
             
             func = globals().get(st.session_state.chosen_method or chosen, None)
             if not callable(func):
@@ -2145,6 +2143,20 @@ if build_clicked:
             mask = completed.isna() & pred_full.notna()
             completed[mask] = pred_full[mask]
             completed = completed.ffill(axis=1)
+
+            # Generate bootstrap reports independently of the chosen method
+            method_configs = st.session_state.get("METHOD_CONFIGS", {})
+            for bootstrap_name in ("Poissonbootstrap", "ChainLadderBootstrap"):
+                cfg = method_configs.get(bootstrap_name, {})
+                if not bool(cfg.get("Report", False)):
+                    continue
+                bootstrap_func = globals().get(bootstrap_name, None)
+                if not callable(bootstrap_func):
+                    continue
+                try:
+                    _call_method(bootstrap_func, base_for_method, bootstrap_name)
+                except Exception as e:
+                    st.warning(f"{bootstrap_name} report generation failed: {e}")
         except Exception as e:
             st.error(f"Completion failed: {e}")
             st.stop()
